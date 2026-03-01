@@ -1,13 +1,7 @@
-# DIY LED Spot Controller — Project Context
-> Exported conversation summary for Claude Code
-
----
-
-## Project Overview
+# DIY LED Spot Controller
 
 DIY replacement of 10x 220VAC LED spots with custom COB LED + ESP32 controller units.
-Each spot gets a custom PCB with isolated AC/DC conversion, PWM dimming, thermal monitoring,
-and ESP-NOW wireless control — no WiFi router required.
+Each spot has isolated AC/DC conversion, PWM dimming, NTC thermal monitoring, and ESP-NOW wireless control — no WiFi router required.
 
 ---
 
@@ -25,14 +19,14 @@ and ESP-NOW wireless control — no WiFi router required.
 ### Power Chain (per spot)
 ```
 220VAC → HLK-PM15 → 15VDC → COB LED (via MOSFET PWM)
-                   → MP1584 buck → 3.3VDC → ESP32-C3
+                   → MP1584 buck → 3.3VDC → ESP32
 ```
 
 | Stage | Input | Output | Loss | Efficiency |
 |---|---|---|---|---|
 | HLK-PM15 (AC/DC) | 220VAC | 15VDC | ~1.5W | ~77% |
 | Buck 15V→3.3V (MP1584) | 15V | 3.3V | ~0.3W | ~85% |
-| ESP32-C3 active + ESP-NOW TX | 3.3V | — | ~0.3W | — |
+| ESP32 active + ESP-NOW TX | 3.3V | — | ~0.3W | — |
 | MOSFET switching loss | — | — | ~0.1W | — |
 | COB LED at 5W | 15V@333mA | 5W light | ~1W heat | ~83% |
 | NTC + voltage divider leakage | — | — | ~0.03W | — |
@@ -51,8 +45,8 @@ and ESP-NOW wireless control — no WiFi router required.
 | Gate resistor | 100Ω | Between ESP32 GPIO and MOSFET gate |
 | Flyback diode | 1N4007 | Across COB |
 | Thermal sensor | NTC 10kΩ 0402 | On COB PCB, B=3950 |
-| Noise filter cap | 100nF ceramic | At NTC sensor end of cable |
-| ADC series resistor | 10kΩ | At ESP32 ADC pin |
+| NTC divider resistor | 5.1kΩ | Fixed resistor to 3.3V |
+| Noise filter cap | 100nF ceramic | On ADC signal wire to GND |
 | Interconnect cable | 24 AWG silicone stranded | Between controller and COB module |
 | Connector | JST-PH 2.0mm 2-pin | For easy disconnect |
 
@@ -63,24 +57,25 @@ NTC 0402 SMD fits flush. Cable runs back to ESP32 ADC with noise filtering.
 ### NTC Wiring
 
 ```
-ESP32 END                        COB PCB END
-
 3.3V
  │
-[10kΩ fixed]
+[NTC 10kΩ]
  │
- ├──► ADC GPIO (GPIO34 on WROVER)
+ ├──► ADC GPIO (GPIO34 on WROVER / GPIO1 on C3)
+ │                          │
+ │                        [100nF]
+ │                          │
+[5.1kΩ fixed]              GND
  │
- └────────── cable ─────────┬── [NTC 10kΩ]──┐
-                             │               │
-                           [100nF]          GND
-                             │
-                            GND
+GND
 ```
 
-- Pullup (10kΩ fixed) and series resistor (10kΩ) sit at ESP32 end
-- 100nF cap sits at sensor end to filter noise before it travels down cable
-- Use 32x oversampling in firmware to reduce ADC noise
+- NTC to 3.3V; 5.1kΩ fixed resistor to GND
+- 100nF cap on the ADC signal node to GND for cable noise filtering
+- 32x ADC oversampling in firmware
+- ADC init: dummy `analogRead` required before `analogSetPinAttenuation(ADC_11db)` on ESP32 Arduino core
+
+**Expected ADC value at 25°C room temperature: ~1375** (out of 4095)
 
 ### MOSFET Wiring
 ```
@@ -93,7 +88,7 @@ ESP32 GPIO ──► 100Ω ──► MOSFET Gate
 ```
 220VAC ──► HLK-PM15 ──► 15V rail ──► COB+ ──► COB- ──► MOSFET Drain
                 │                                              │
-                └──► Buck (15V→3.3V) ──► ESP32-C3            MOSFET Source ──► GND
+                └──► Buck (15V→3.3V) ──► ESP32               MOSFET Source ──► GND
                                               │
                                          GPIO (PWM) ──► 100Ω ──► MOSFET Gate
 ```
@@ -160,14 +155,14 @@ P_heat → [θjc COB ~4°C/W] → [θcs paste ~0.3°C/W] → [θsa heatsink ~19�
 
 ```c
 // Master → Spot
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t spot_id;     // 0xFF = broadcast all
-    uint8_t brightness;  // 0-255
-    uint8_t command;     // CMD_SET_BRIGHTNESS, CMD_TURN_ON, CMD_TURN_OFF, CMD_REQUEST_STATUS
+    uint8_t brightness;  // 0–255
+    uint8_t command;     // CMD_* values below
 } esp_now_cmd_t;
 
 // Spot → Master
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t spot_id;
     uint8_t brightness;
     float   temperature;
@@ -179,9 +174,9 @@ typedef struct {
 ### Commands
 | Value | Name | Description |
 |---|---|---|
-| 0x01 | CMD_SET_BRIGHTNESS | Set brightness 0-255 |
-| 0x02 | CMD_TURN_ON | Turn on (with optional brightness) |
-| 0x03 | CMD_TURN_OFF | Turn off with fade |
+| 0x01 | CMD_SET_BRIGHTNESS | Set brightness 0–255 |
+| 0x02 | CMD_TURN_ON | Turn on (with optional brightness, 300ms fade) |
+| 0x03 | CMD_TURN_OFF | Turn off (500ms fade) |
 | 0x04 | CMD_REQUEST_STATUS | Force immediate status reply |
 
 ---
@@ -197,22 +192,31 @@ typedef struct {
 
 ---
 
+## Status LED (GPIO2)
+
+| State | Pattern |
+|---|---|
+| NORMAL | 1 s on / 2 s off |
+| THROTTLING | Solid ON |
+| CRITICAL | 100 ms on / 100 ms off (rapid) |
+| NTC fault | CRITICAL pattern (floating/disconnected sensor) |
+
+---
+
 ## GPIO Pin Mapping
 
 ### ESP32 WROVER (Prototype)
 | Function | GPIO | Notes |
 |---|---|---|
-| PWM → MOSFET gate | GPIO18 | 10kHz PWM |
-| NTC ADC | GPIO34 | Input-only pin, good for ADC |
+| PWM → MOSFET gate | GPIO18 | 10kHz, 8-bit LEDC |
+| NTC ADC | GPIO34 | Input-only ADC1 channel |
 | Status LED | GPIO2 | Onboard LED |
 
 ### ESP32-C3 SuperMini (Final)
 | Function | GPIO | Notes |
 |---|---|---|
 | PWM → MOSFET gate | GPIO3 | |
-| NTC ADC | GPIO1 | Check pinout |
-| I2C SDA (if needed) | GPIO8 | |
-| I2C SCL (if needed) | GPIO9 | |
+| NTC ADC | GPIO1 | |
 
 > All pin assignments are `#define` in `config.h` — porting is just changing those values.
 
@@ -222,19 +226,31 @@ typedef struct {
 
 ```
 spot_firmware/
-└── main/
-    ├── main.ino              # Main loop, setup, command handler, thermal policy
-    ├── config.h              # All pin defines, thresholds, IDs — edit this to port
-    ├── thermal.h             # NTC reading, Steinhart-Hart, thermal throttle logic
-    ├── dimming.h             # PWM setup, fadeTo, brightness control
-    └── espnow_manager.h      # ESP-NOW init, packet structs, send/receive
+├── platformio.ini
+└── src/
+    ├── main.cpp          # setup(), loop(), command handler, thermal policy, status LED
+    ├── config.h          # All pin defines, thresholds, timing, packet structs — edit to port
+    ├── thermal.h/.cpp    # NTC read (32x oversampling), Steinhart-Hart, throttle logic
+    ├── dimming.h/.cpp    # LEDC init, setBrightness(), fadeTo()
+    └── espnow_manager.h/.cpp  # ESP-NOW init, peer registration, send/receive
 ```
 
 ### Key config.h values to update per unit
 ```c
-#define SPOT_ID       0x01   // Unique per spot: 0x01 to 0x0A
-uint8_t MASTER_MAC[]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Update with real MAC
+#define SPOT_ID  0x01   // Unique per spot: 0x01–0x0A
+static const uint8_t MASTER_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Real master MAC
 ```
+
+### PlatformIO commands
+```bash
+cd spot_firmware
+pio run                          # compile
+pio run --target upload          # compile + flash
+pio device monitor               # serial monitor at 115200
+```
+
+### Known hardware quirk
+On ESP32 Arduino core, `analogSetPinAttenuation()` only takes effect after the ADC channel has been initialised. Always call a dummy `analogRead(pin)` before setting attenuation, otherwise the ADC reads 0 regardless of input voltage.
 
 ---
 
@@ -242,7 +258,7 @@ uint8_t MASTER_MAC[]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Update with re
 
 - Design tool: **EasyEDA** (directly linked to JLCPCB + LCSC)
 - Manufacturer: **JLCPCB**
-- Strategy: Design 1 unit → validate → order qty 10 (manufacturer handles duplication)
+- Strategy: Design 1 unit → validate → order qty 10
 - Assembly: Hybrid — JLCPCB SMT for passives, hand solder HLK-PM15 + ESP32 + MOSFET
 
 ### Cost Estimate (10 units)
@@ -254,30 +270,19 @@ uint8_t MASTER_MAC[]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Update with re
 
 ---
 
-## Simulation & Testing Tools
+## Validation Workflow
 
-| Tool | Purpose | URL |
-|---|---|---|
-| Wokwi | ESP32-C3 firmware + ESP-NOW simulation | wokwi.com |
-| Falstad | Analog circuit validation (NTC divider, RC filter, MOSFET) | falstad.com/circuit |
-| LTSpice | MOSFET switching waveform, PWM ringing check | Desktop app |
-| EasyEDA | Schematic + PCB design → JLCPCB export | easyeda.com |
-
-### Recommended workflow
-1. Validate NTC voltage divider + RC filter in **Falstad**
-2. Test firmware + ESP-NOW between virtual boards in **Wokwi**
+1. Validate NTC voltage divider + RC filter in **Falstad** (falstad.com/circuit)
+2. Prototype firmware on **WROVER** before flashing C3 units
 3. Draw schematic + PCB layout in **EasyEDA**
 4. Export Gerber + BOM → order on **JLCPCB × 10**
-5. Prototype firmware on **WROVER** before flashing C3 units
 
 ---
 
-## Next Steps (at time of export)
+## Next Steps
 
 - [ ] Write master controller firmware
 - [ ] Draw schematic in EasyEDA
-- [ ] Test NTC circuit in Falstad
-- [ ] Test ESP-NOW in Wokwi with spot firmware
 - [ ] PCB layout → JLCPCB quote
 - [ ] Print test enclosures in PLA
 - [ ] Validate thermal performance on first assembled unit

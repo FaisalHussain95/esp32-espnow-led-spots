@@ -10,7 +10,7 @@ static bool     g_is_on                = false;
 static float    g_temperature          = 0.0f;
 static uint8_t  g_thermal_state        = THERMAL_NORMAL;
 static uint32_t g_last_thermal_ms      = 0;
-static uint32_t g_last_blink_ms        = 0;
+static uint32_t g_last_report_ms       = 0;
 
 // ─── Forward declarations ─────────────────────────────────────────────────────
 static void handleCommand(const esp_now_cmd_t &cmd);
@@ -25,12 +25,15 @@ void setup() {
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
-    // Set ADC full-scale to 0–3.3V (default 0dB = 0–1.1V would saturate NTC reads)
-    analogSetAttenuation(ADC_11db);
-    analogReadResolution(12);  // 12-bit → 0–4095
+    analogReadResolution(12);       // 12-bit → 0–4095
+    analogRead(PIN_NTC_ADC);        // Dummy read to initialise the ADC channel
+    analogSetPinAttenuation(PIN_NTC_ADC, ADC_11db);  // Now set 11dB (0–3.3V range)
 
     dimming_init();
     espnow_init();
+
+    // Announce boot to master so it can restore our state
+    sendStatus(0, 0.0f, THERMAL_NORMAL, false);
 
     Serial.println("[BOOT] Ready.");
 }
@@ -51,11 +54,14 @@ void loop() {
         runThermalPolicy();
     }
 
-    // 3. Status LED heartbeat
-    if (now - g_last_blink_ms >= STATUS_BLINK_INTERVAL_MS) {
-        g_last_blink_ms = now;
-        updateStatusLED();
+    // 3. Periodic status report to master every 10 seconds
+    if (now - g_last_report_ms >= STATUS_REPORT_INTERVAL_MS) {
+        g_last_report_ms = now;
+        sendStatus(getBrightness(), g_temperature, g_thermal_state, g_is_on);
     }
+
+    // 4. Status LED heartbeat (non-uniform timing handled inside)
+    updateStatusLED();
 }
 
 // ─── Command handler ──────────────────────────────────────────────────────────
@@ -133,18 +139,30 @@ static void runThermalPolicy() {
 }
 
 // ─── Status LED ───────────────────────────────────────────────────────────────
+// NORMAL   → 1 s on / 2 s off
+// THROTTLE → solid ON
+// CRITICAL → rapid 100 ms on / 100 ms off
 static void updateStatusLED() {
-    // NORMAL   → slow blink (toggled every STATUS_BLINK_INTERVAL_MS)
-    // THROTTLE → solid ON
-    // CRITICAL → same toggle rate as NORMAL (distinguishable by Serial output)
-    static bool led_state = false;
+    static bool     led_on        = false;
+    static uint32_t phase_end_ms  = 0;
+
+    uint32_t now = millis();
+    if (now < phase_end_ms) return;  // Still in current phase
 
     if (g_thermal_state == THERMAL_THROTTLE) {
         digitalWrite(PIN_STATUS_LED, HIGH);
-        led_state = true;
+        led_on       = true;
+        phase_end_ms = now + STATUS_LED_ON_MS;  // Re-check every 1 s (solid on)
         return;
     }
 
-    led_state = !led_state;
-    digitalWrite(PIN_STATUS_LED, led_state ? HIGH : LOW);
+    // Toggle and schedule next phase
+    led_on = !led_on;
+    digitalWrite(PIN_STATUS_LED, led_on ? HIGH : LOW);
+
+    if (g_thermal_state == THERMAL_CRITICAL) {
+        phase_end_ms = now + 100;               // Fast blink: 100 ms per phase
+    } else {
+        phase_end_ms = now + (led_on ? STATUS_LED_ON_MS : STATUS_LED_OFF_MS);
+    }
 }

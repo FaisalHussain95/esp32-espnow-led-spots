@@ -6,7 +6,7 @@
 #define SPOT_ID  0x01
 
 // Placeholder: replace with actual master MAC (run WiFi.macAddress() on master)
-static const uint8_t MASTER_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 
 // ─── GPIO Pin Assignments (ESP32 WROVER prototype) ────────────────────────────
 #define PIN_PWM_OUT     18   // LEDC output → 100Ω → IRLZ44N gate
@@ -24,7 +24,7 @@ static const uint8_t MASTER_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define NTC_B_COEFF     3950.0f    // Beta coefficient
 #define NTC_R0         10000.0f    // NTC nominal resistance at T0 (ohms)
 #define NTC_T0          298.15f    // T0 in Kelvin (25°C)
-#define NTC_R_PULLUP   10000.0f    // Fixed pullup to 3.3V at ESP32 end (ohms)
+#define NTC_R_PULLUP    5100.0f    // Fixed resistor to GND (5.1kΩ); NTC is on the 3.3V side
 #define ADC_MAX_VALUE   4095.0f    // 12-bit ADC full scale
 
 // ─── Thermal Thresholds (°C) ──────────────────────────────────────────────────
@@ -39,8 +39,10 @@ static const uint8_t MASTER_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // ─── Timing (ms) ──────────────────────────────────────────────────────────────
 #define THERMAL_CHECK_INTERVAL_MS  1000
+#define STATUS_REPORT_INTERVAL_MS 10000  // Periodic unsolicited status to master
 #define FADE_STEP_DELAY_MS           10
-#define STATUS_BLINK_INTERVAL_MS    500
+#define STATUS_LED_ON_MS           1000   // NORMAL state: LED on duration
+#define STATUS_LED_OFF_MS          2000   // NORMAL state: LED off duration
 
 // ─── ESP-NOW Command Bytes ────────────────────────────────────────────────────
 #define CMD_SET_BRIGHTNESS  0x01

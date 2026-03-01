@@ -16,10 +16,11 @@ float readTemperatureC() {
         return -999.0f;
     }
 
-    // Voltage divider: 3.3V → [R_pullup=10kΩ] → node → [NTC] → GND
-    // ADC reads at node. V_node = 3.3V * R_ntc / (R_pullup + R_ntc)
-    // Solving for R_ntc: R_ntc = R_pullup * adc_avg / (ADC_MAX - adc_avg)
-    float r_ntc = NTC_R_PULLUP * adc_avg / (ADC_MAX_VALUE - adc_avg);
+    // Voltage divider: 3.3V → [NTC 10kΩ] → ADC node → [R_fixed=5.1kΩ] → GND
+    //                                               → [100nF]          → GND
+    // V_adc = 3.3V * R_fixed / (R_ntc + R_fixed)
+    // Solving for R_ntc: R_ntc = R_fixed * (ADC_MAX - adc_avg) / adc_avg
+    float r_ntc = NTC_R_PULLUP * (ADC_MAX_VALUE - adc_avg) / adc_avg;
 
     // Steinhart-Hart simplified Beta equation:
     //   1/T = 1/T0 + (1/B) * ln(R/R0)

@@ -44,9 +44,10 @@ spot_firmware/
 | Status LED | GPIO2 | — |
 
 ### NTC Temperature Sensing
-- Voltage divider: 10kΩ pullup at ESP32 end, NTC 10kΩ 0402 SMD (B=3950) at COB end
-- 10kΩ series resistor at ESP32 ADC pin; 100nF cap at sensor end for cable noise filtering
-- Firmware: 32x ADC oversampling + Steinhart-Hart equation
+- Voltage divider: NTC 10kΩ MF52 (B=3950) to 3.3V, 5.1kΩ fixed resistor to GND
+- 100nF cap on the ADC signal wire to GND for cable noise filtering
+- ADC init quirk: dummy `analogRead` must be called before `analogSetPinAttenuation(ADC_11db)` on ESP32 Arduino core or attenuation doesn't apply
+- Firmware: 32x ADC oversampling + Steinhart-Hart Beta equation
 
 ### Thermal Protection Policy
 
