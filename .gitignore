@@ -37,3 +37,14 @@ kicad/**/~*
 kicad/**/_autosave*
 kicad/**/fp-info-cache
 kicad/diy_led_spot/diy_led_spot-backups
+*.gbr
+*.gbl
+*.gtl
+*.gbs
+*.gbp
+*.gm1
+*.gtp
+*.gbo
+*.gbrjob
+*.gts
+*.gto
