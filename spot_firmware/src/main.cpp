@@ -3,6 +3,8 @@
 #include "thermal.h"
 #include "dimming.h"
 #include "espnow_manager.h"
+#include "provisioning.h"
+#include "ota.h"
 
 // ─── Global state ─────────────────────────────────────────────────────────────
 static uint8_t  g_requested_brightness = 255;  // Master's intended brightness
@@ -20,20 +22,20 @@ static void updateStatusLED();
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial.printf("[BOOT] Spot node ID=0x%02X\n", SPOT_ID);
+    Serial.printf("[BOOT] Spot node ID=0x%02X  FW_VERSION=%d\n", SPOT_ID, FW_VERSION);
 
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, STATUS_LED_OFF);
+
+    // Write PMK + WiFi creds to NVS on first boot (reads from Kconfig/menuconfig)
+    provisioning_init();
 
     analogReadResolution(12);       // 12-bit → 0–4095
     analogRead(PIN_NTC_ADC);        // Dummy read to initialise the ADC channel
     analogSetPinAttenuation(PIN_NTC_ADC, ADC_11db);  // Now set 11dB (0–3.3V range)
 
     dimming_init();
-    espnow_init();
-
-    // Announce boot to master so it can restore our state
-    sendStatus(0, 0.0f, THERMAL_NORMAL, false);
+    espnow_init();  // Loads PMK, enables encryption, sends MSG_HELLO to master
 
     Serial.println("[BOOT] Ready.");
 }
@@ -46,6 +48,13 @@ void loop() {
     esp_now_cmd_t cmd;
     if (espnow_getCommand(&cmd)) {
         handleCommand(cmd);
+    }
+
+    // 1b. Check for OTA trigger from master
+    uint8_t ota_version = 0;
+    if (espnow_getOtaTrigger(&ota_version)) {
+        Serial.printf("[OTA] Triggered — target version %d\n", ota_version);
+        ota_start(ota_version);  // Blocks until done or all retries fail
     }
 
     // 2. Thermal check every 1 second

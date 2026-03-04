@@ -1,0 +1,113 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - env: esp32c3supermini
+            dir: spot_firmware
+            artifact: slave_c3_supermini
+          - env: ttgo-lora32-v1
+            dir: master_firmware
+            artifact: master_ttgo
+          - env: esp32dev
+            dir: wifi_bridge_firmware
+            artifact: wifi_bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ${{ matrix.artifact }}
+        working-directory: ${{ matrix.dir }}
+        env:
+          # Inject a placeholder PMK so the build succeeds without real credentials.
+          # Real credentials are set via menuconfig before flashing real devices.
+          PLATFORMIO_BUILD_FLAGS: >-
+            -DCONFIG_ESPNOW_PMK=\"00000000000000000000000000000000\"
+            -DCONFIG_WIFI_SSID=\"placeholder\"
+            -DCONFIG_WIFI_PASSWORD=\"placeholder\"
+            -DCONFIG_MQTT_BROKER_IP=\"192.168.1.1\"
+            -DCONFIG_MQTT_PORT=1883
+            -DCONFIG_MQTT_USER=\"\"
+            -DCONFIG_MQTT_PASSWORD=\"\"
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Rename binary
+        working-directory: ${{ matrix.dir }}
+        run: |
+          cp .pio/build/${{ matrix.env }}/firmware.bin \
+             ../${{ matrix.artifact }}_v${{ steps.version.outputs.version }}.bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}_v${{ steps.version.outputs.version }}
+          path: ${{ matrix.artifact }}_v${{ steps.version.outputs.version }}.bin
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## DIY LED Spots — Firmware ${{ github.ref_name }}
+
+            ### Binaries
+            | File | Description |
+            |---|---|
+            | `slave_c3_supermini_v${{ steps.version.outputs.version }}.bin` | Spot node (ESP32-C3 SuperMini) |
+            | `master_ttgo_v${{ steps.version.outputs.version }}.bin` | Master node (TTGO LoRa32) |
+            | `wifi_bridge_v${{ steps.version.outputs.version }}.bin` | WiFi bridge (generic ESP32) |
+
+            ### OTA Update
+            To push OTA to all spots:
+            ```
+            # Via serial on master:
+            version ${{ steps.version.outputs.version }}
+
+            # Via MQTT (Home Assistant):
+            Topic:   homeassistant/led_spots/ota/set
+            Payload: {"version":${{ steps.version.outputs.version }}}
+            ```
+
+            > **Note:** Flash master and wifi_bridge manually. Only spot nodes update via OTA.
+          files: artifacts/*.bin
+          draft: false
+          prerelease: false

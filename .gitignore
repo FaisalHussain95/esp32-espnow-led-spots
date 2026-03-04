@@ -1,10 +1,10 @@
 # PlatformIO
-spot_firmware/.pio/
-spot_firmware/.pioenvs/
-spot_firmware/.piolibdeps/
+**/.pio/
+**/.pioenvs/
+**/.piolibdeps/
 
 # PlatformIO local config (per-developer overrides)
-spot_firmware/.vscode/
+**/.vscode/
 
 # EasyEDA / KiCad project exports
 *.gbr

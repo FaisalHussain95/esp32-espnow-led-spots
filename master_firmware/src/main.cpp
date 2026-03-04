@@ -1,12 +1,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <Preferences.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "config.h"
+
+// ─── PMK (loaded from NVS on boot) ────────────────────────────────────────────
+static uint8_t _pmk[16] = {};
+
+// Required slave firmware version (loaded from NVS namespace "config", key "fw_version")
+static uint8_t _required_fw_version = FW_VERSION;
 
 // ─── OLED ─────────────────────────────────────────────────────────────────────
 // TTGO LoRa32 V1.0/V1.2: SSD1306 128×64, I2C on SDA=4, SCL=15, RST=16
@@ -20,21 +27,128 @@
 static Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST);
 
 // ─── Receive buffer (ISR → loop bridge) ───────────────────────────────────────
-static volatile bool    _status_available = false;
-static esp_now_status_t _status_buffer;
+// Two separate volatile buffers: one for status packets, one for events
+static volatile bool    _status_available  = false;
+static volatile bool    _hello_available   = false;
+static volatile bool    _ota_fail_available = false;
+
+static esp_now_status_t  _status_buffer;
+
+typedef struct {
+    uint8_t mac[6];
+    uint8_t fw_version;
+} hello_event_t;
+static hello_event_t _hello_buffer;
+
+typedef struct {
+    uint8_t spot_id;
+    uint8_t attempt;
+} ota_fail_event_t;
+static ota_fail_event_t _ota_fail_buffer;
 
 // Last known state per spot (index 0 = spot 0x01)
 static esp_now_status_t g_spot_state[NUM_SPOTS] = {};
 
+// ─── Forward declarations ──────────────────────────────────────────────────────
+static void addPeer(const uint8_t *mac);
+static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness);
+
 // ─── ESP-NOW callbacks ────────────────────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
-    if (len != sizeof(esp_now_status_t)) return;
-    memcpy((void *)&_status_buffer, data, sizeof(esp_now_status_t));
-    _status_available = true;
+    if (len < (int)sizeof(espnow_header_t)) return;
+
+    const espnow_header_t *hdr = (const espnow_header_t *)data;
+
+    switch (hdr->msg_type) {
+        case MSG_STATUS: {
+            if (len < (int)sizeof(espnow_status_packet_t)) return;
+            const espnow_status_packet_t *pkt = (const espnow_status_packet_t *)data;
+            memcpy((void *)&_status_buffer, &pkt->status, sizeof(esp_now_status_t));
+            _status_available = true;
+            break;
+        }
+        case MSG_HELLO: {
+            memcpy((void *)_hello_buffer.mac, hdr->mac, 6);
+            _hello_buffer.fw_version = hdr->fw_version;
+            _hello_available = true;
+            break;
+        }
+        case MSG_OTA_FAILED: {
+            if (len < (int)sizeof(espnow_status_packet_t)) {
+                // Just header — use mac to find spot_id
+                // spot_id is encoded in attempt field (repurposed as spot_id here)
+                _ota_fail_buffer.spot_id = hdr->attempt;
+                _ota_fail_buffer.attempt = 0;
+            } else {
+                const espnow_status_packet_t *pkt = (const espnow_status_packet_t *)data;
+                _ota_fail_buffer.spot_id = pkt->status.spot_id;
+                _ota_fail_buffer.attempt = hdr->attempt;
+            }
+            _ota_fail_available = true;
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 static void onDataSent(const uint8_t *mac, esp_now_send_status_t status) {
     (void)mac; (void)status;
+}
+
+// ─── Provisioning: PMK from Kconfig → NVS ────────────────────────────────────
+static bool hexCharToByte(char c, uint8_t &out) {
+    if (c >= '0' && c <= '9') { out = c - '0';        return true; }
+    if (c >= 'a' && c <= 'f') { out = c - 'a' + 10;   return true; }
+    if (c >= 'A' && c <= 'F') { out = c - 'A' + 10;   return true; }
+    return false;
+}
+
+static void provisioning_init() {
+    Preferences prefs;
+
+#if defined(CONFIG_PROV_FORCE_RESET) && CONFIG_PROV_FORCE_RESET
+    // Force-overwrite NVS — use when changing the PMK after first flash.
+    // Set -DCONFIG_PROV_FORCE_RESET=1 in platformio.ini build_flags, flash once,
+    // then remove the flag and reflash to return to normal NVS-first behaviour.
+    Serial.println("[PROV] FORCE RESET — clearing NVS credentials.");
+    prefs.begin("espnow", false); prefs.clear(); prefs.end();
+    prefs.begin("config", false); prefs.clear(); prefs.end();
+#endif
+
+    prefs.begin("espnow", false);
+
+    // Check if PMK already stored
+    if (prefs.getBytesLength("pmk") == 16) {
+        prefs.getBytes("pmk", _pmk, 16);
+        Serial.println("[PROV] PMK loaded from NVS.");
+    } else {
+        // Write PMK from build_flags CONFIG_ESPNOW_PMK (32 hex chars → 16 bytes)
+        const char *hex = CONFIG_ESPNOW_PMK;
+        size_t hexlen = strlen(hex);
+        if (hexlen != 32) {
+            Serial.println("[ERR] CONFIG_ESPNOW_PMK must be 32 hex chars — check build_flags");
+            while (true) delay(1000);
+        }
+        for (int i = 0; i < 16; i++) {
+            uint8_t hi, lo;
+            if (!hexCharToByte(hex[i * 2], hi) || !hexCharToByte(hex[i * 2 + 1], lo)) {
+                Serial.println("[ERR] CONFIG_ESPNOW_PMK contains invalid hex — check build_flags");
+                while (true) delay(1000);
+            }
+            _pmk[i] = (hi << 4) | lo;
+        }
+        prefs.putBytes("pmk", _pmk, 16);
+        Serial.println("[PROV] PMK written to NVS from build_flags.");
+    }
+    prefs.end();
+
+    // Load required fw_version from NVS (default = FW_VERSION)
+    prefs.begin("config", false);
+    _required_fw_version = prefs.getUChar("fw_version", FW_VERSION);
+    prefs.end();
+
+    Serial.printf("[PROV] Required slave fw_version: %d\n", _required_fw_version);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,31 +157,102 @@ static void addPeer(const uint8_t *mac) {
     esp_now_peer_info_t peer = {};
     memcpy(peer.peer_addr, mac, 6);
     peer.channel = 0;
-    peer.encrypt = false;
+
+    // Check if this is the broadcast peer — broadcast cannot be encrypted
+    bool is_broadcast = true;
+    for (int i = 0; i < 6; i++) {
+        if (mac[i] != 0xFF) { is_broadcast = false; break; }
+    }
+    if (is_broadcast) {
+        peer.encrypt = false;
+    } else {
+        peer.encrypt = true;
+        memcpy(peer.lmk, _pmk, 16);  // use PMK as LMK (shared key approach)
+    }
     esp_now_add_peer(&peer);
 }
 
+static void buildCmdPacket(espnow_cmd_packet_t &pkt, uint8_t spot_id, uint8_t command, uint8_t brightness) {
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type   = MSG_CMD;
+    pkt.header.fw_version = FW_VERSION;
+    pkt.header.attempt    = 0;
+    // Leave mac[] zero — master MAC not needed by spots
+    pkt.cmd.spot_id    = spot_id;
+    pkt.cmd.command    = command;
+    pkt.cmd.brightness = brightness;
+}
+
 static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness) {
-    esp_now_cmd_t cmd;
-    cmd.spot_id    = spot_id;
-    cmd.command    = command;
-    cmd.brightness = brightness;
+    espnow_cmd_packet_t pkt;
+    buildCmdPacket(pkt, spot_id, command, brightness);
 
     if (spot_id == 0xFF) {
-        esp_now_send(BROADCAST_MAC, (uint8_t *)&cmd, sizeof(cmd));
+        esp_now_send(BROADCAST_MAC, (uint8_t *)&pkt, sizeof(pkt));
     } else if (spot_id >= 0x01 && spot_id <= 0x0A) {
-        esp_now_send(SPOT_MACS[spot_id - 1], (uint8_t *)&cmd, sizeof(cmd));
+        esp_now_send(SPOT_MACS[spot_id - 1], (uint8_t *)&pkt, sizeof(pkt));
     } else {
         Serial.printf("[ERR] Invalid spot ID: 0x%02X\n", spot_id);
+    }
+}
+
+static void sendOtaBroadcast(uint8_t target_version) {
+    espnow_ota_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type      = MSG_OTA_NOW;
+    pkt.header.fw_version    = FW_VERSION;
+    pkt.header.attempt       = 0;
+    pkt.target_version       = target_version;
+    esp_now_send(BROADCAST_MAC, (uint8_t *)&pkt, sizeof(pkt));
+    Serial.printf("[OTA] Broadcast OTA_NOW → target_version=%d\n", target_version);
+}
+
+static void sendAck(const uint8_t *mac) {
+    espnow_header_t ack = {};
+    ack.msg_type   = MSG_ACK;
+    ack.fw_version = FW_VERSION;
+    esp_now_send(mac, (uint8_t *)&ack, sizeof(ack));
+}
+
+static void sendReject(const uint8_t *mac, uint8_t target_version) {
+    espnow_ota_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type   = MSG_REJECT;
+    pkt.header.fw_version = FW_VERSION;
+    pkt.target_version    = target_version;
+    esp_now_send(mac, (uint8_t *)&pkt, sizeof(pkt));
+}
+
+// ─── HELLO handler (called from loop, not ISR) ────────────────────────────────
+static void handleHello(const uint8_t *mac, uint8_t spot_fw_version) {
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    Serial.printf("[HELLO] MAC=%s  fw=%d  required=%d\n",
+                  mac_str, spot_fw_version, _required_fw_version);
+
+    // Dynamically register peer with encryption if not already known
+    if (!esp_now_is_peer_exist(mac)) {
+        addPeer(mac);
+        Serial.printf("[HELLO] New peer registered: %s\n", mac_str);
+    }
+
+    if (spot_fw_version >= _required_fw_version) {
+        sendAck(mac);
+        Serial.printf("[HELLO] → ACK (fw ok)\n");
+    } else {
+        sendReject(mac, _required_fw_version);
+        Serial.printf("[HELLO] → REJECT + OTA target=%d\n", _required_fw_version);
     }
 }
 
 // ─── OLED display ─────────────────────────────────────────────────────────────
 // Shows the last received status for each known spot, 1 row per spot.
 // Layout (128×64, 8px rows):
-//   Row 0: "MASTER  <MAC tail>"
-//   Row 1: "─────────────────"
-//   Row 2..7: "S1 ON  255 24.3C"  (one spot per row, up to 6)
+//   Row 0: "MASTER  LED SPOTS"
+//   Row 1: separator line
+//   Row 2..7: "S1 ON  255 24.3C!"  (one spot per row, up to 6)
 
 static void updateOLED() {
     oled.clearDisplay();
@@ -112,14 +297,84 @@ static void updateOLED() {
     oled.display();
 }
 
+// ─── UART2 bridge (to WiFi ESP32-B) ──────────────────────────────────────────
+// Frame format (command, 6 bytes):  0xAA 0x01 spot_id brightness command 0x55
+// Frame format (status,  9 bytes):  0xAA 0x02 spot_id brightness temp_hi temp_lo thermal_state is_on 0x55
+//   temperature encoded as int16 in 0.1°C units (e.g. 24.3°C → 243)
+// Frame format (version, 4 bytes):  0xAA 0x03 target_version 0x55
+#define UART2_START   0xAA
+#define UART2_END     0x55
+#define UART2_CMD     0x01
+#define UART2_STATUS  0x02
+#define UART2_VERSION 0x03
+
+static void uart2_send_status(const esp_now_status_t &s) {
+    int16_t temp_raw = (int16_t)(s.temperature * 10.0f);
+    uint8_t frame[9];
+    frame[0] = UART2_START;
+    frame[1] = UART2_STATUS;
+    frame[2] = s.spot_id;
+    frame[3] = s.brightness;
+    frame[4] = (uint8_t)(temp_raw >> 8);
+    frame[5] = (uint8_t)(temp_raw & 0xFF);
+    frame[6] = s.thermal_state;
+    frame[7] = s.is_on ? 1 : 0;
+    frame[8] = UART2_END;
+    Serial2.write(frame, 9);
+}
+
+static uint8_t _u2buf[8];
+static uint8_t _u2len = 0;
+
+static void uart2_poll() {
+    while (Serial2.available()) {
+        uint8_t b = (uint8_t)Serial2.read();
+
+        if (_u2len == 0) {
+            if (b == UART2_START) _u2buf[_u2len++] = b;
+            continue;
+        }
+        _u2buf[_u2len++] = b;
+
+        if (_u2len == 4 && _u2buf[1] == UART2_VERSION) {
+            // Version frame: 0xAA 0x03 target_version 0x55
+            if (_u2buf[3] == UART2_END) {
+                uint8_t target = _u2buf[2];
+                Serial.printf("[UART2] VERSION target=%d\n", target);
+                // Save to NVS and broadcast OTA
+                Preferences prefs;
+                prefs.begin("config", false);
+                prefs.putUChar("fw_version", target);
+                prefs.end();
+                _required_fw_version = target;
+                sendOtaBroadcast(target);
+            }
+            _u2len = 0;
+        } else if (_u2len == 6) {
+            // Command frame: 0xAA 0x01 spot_id bri cmd 0x55
+            if (_u2buf[1] == UART2_CMD && _u2buf[5] == UART2_END) {
+                uint8_t spot_id = _u2buf[2];
+                uint8_t bri     = _u2buf[3];
+                uint8_t command = _u2buf[4];
+                Serial.printf("[UART2] CMD spot=0x%02X cmd=0x%02X bri=%d\n", spot_id, command, bri);
+                sendCommand(spot_id, command, bri);
+            }
+            _u2len = 0;
+        } else if (_u2len >= sizeof(_u2buf)) {
+            _u2len = 0;  // overrun — discard
+        }
+    }
+}
+
 // ─── Serial command parser ────────────────────────────────────────────────────
 static void printHelp() {
     Serial.println("Commands:");
-    Serial.println("  on  <spot|all> [bri]   Turn on (bri=0..255, default 255)");
-    Serial.println("  off <spot|all>         Turn off");
-    Serial.println("  dim <spot|all> <bri>   Set brightness 0..255");
-    Serial.println("  status <spot|all>      Request status reply");
-    Serial.println("  help                   This message");
+    Serial.println("  on      <spot|all> [bri]   Turn on (bri=0..255, default 255)");
+    Serial.println("  off     <spot|all>         Turn off");
+    Serial.println("  dim     <spot|all> <bri>   Set brightness 0..255");
+    Serial.println("  status  <spot|all>         Request status reply");
+    Serial.println("  version <N>                Set required fw version, broadcast OTA");
+    Serial.println("  help                       This message");
     Serial.println("  <spot>: 1-10  or  all");
 }
 
@@ -180,6 +435,22 @@ static void processLine(char *line) {
         return;
     }
 
+    if (strcasecmp(tok, "version") == 0) {
+        char *ver_tok = strtok(nullptr, " \t\r\n");
+        if (!ver_tok) { Serial.println("[ERR] Usage: version <N>"); return; }
+        uint8_t target = (uint8_t)atoi(ver_tok);
+        if (target == 0) { Serial.println("[ERR] Version must be >= 1"); return; }
+        // Save to NVS
+        Preferences prefs;
+        prefs.begin("config", false);
+        prefs.putUChar("fw_version", target);
+        prefs.end();
+        _required_fw_version = target;
+        Serial.printf("[CMD] VERSION target=%d — broadcasting OTA_NOW\n", target);
+        sendOtaBroadcast(target);
+        return;
+    }
+
     Serial.printf("[ERR] Unknown command: '%s'  (type 'help')\n", tok);
 }
 
@@ -187,6 +458,7 @@ static void processLine(char *line) {
 void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Disable brownout reset
     Serial.begin(115200);
+    Serial2.begin(115200, SERIAL_8N1, PIN_UART2_RX, PIN_UART2_TX);
     delay(200);
 
     pinMode(OLED_RST, OUTPUT);
@@ -206,6 +478,9 @@ void setup() {
         oled.display();
     }
 
+    // Load PMK from NVS (write from Kconfig on first boot)
+    provisioning_init();
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     Serial.printf("[BOOT] Master — MAC: %s\n", WiFi.macAddress().c_str());
@@ -215,11 +490,18 @@ void setup() {
         while (true) delay(1000);
     }
 
+    // Set shared PMK for encrypted communication
+    if (esp_now_set_pmk(_pmk) != ESP_OK) {
+        Serial.println("[WARN] esp_now_set_pmk failed");
+    }
+
     esp_now_register_recv_cb(onDataReceive);
     esp_now_register_send_cb(onDataSent);
 
+    // Broadcast peer (unencrypted — needed for OTA broadcast)
     addPeer(BROADCAST_MAC);
 
+    // Pre-register known spot peers (with encryption)
     for (int i = 0; i < NUM_SPOTS; i++) {
         bool is_broadcast = true;
         for (int b = 0; b < 6; b++) {
@@ -239,7 +521,17 @@ static char    _line_buf[64];
 static uint8_t _line_len = 0;
 
 void loop() {
-    // 1. Process received status packets
+    // 1. Handle HELLO from spots (dynamic peer registration + version check)
+    if (_hello_available) {
+        _hello_available = false;
+        uint8_t mac[6];
+        uint8_t fw_ver;
+        memcpy(mac, (const void *)_hello_buffer.mac, 6);
+        fw_ver = _hello_buffer.fw_version;
+        handleHello(mac, fw_ver);
+    }
+
+    // 2. Process received status packets
     if (_status_available) {
         _status_available = false;
         esp_now_status_t s;
@@ -272,10 +564,21 @@ void loop() {
                       s.spot_id, s.is_on ? "ON " : "OFF",
                       s.brightness, s.temperature, state_str);
 
+        uart2_send_status(s);
         updateOLED();
     }
 
-    // 2. Accumulate serial input, process on newline
+    // 3. Log OTA failure notifications from spots
+    if (_ota_fail_available) {
+        _ota_fail_available = false;
+        Serial.printf("[OTA] Spot 0x%02X reported OTA failure (attempt %d)\n",
+                      _ota_fail_buffer.spot_id, _ota_fail_buffer.attempt);
+    }
+
+    // 4. Poll UART2 for incoming frames from WiFi ESP32-B
+    uart2_poll();
+
+    // 5. Accumulate serial input, process on newline
     while (Serial.available()) {
         char c = (char)Serial.read();
         if (c == '\n' || c == '\r') {

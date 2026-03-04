@@ -52,7 +52,23 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define STATUS_LED_ON_MS           1000   // NORMAL state: LED on duration
 #define STATUS_LED_OFF_MS          2000   // NORMAL state: LED off duration
 
-// ─── ESP-NOW Command Bytes ────────────────────────────────────────────────────
+// ─── Firmware Version & OTA ───────────────────────────────────────────────────
+#define FW_VERSION  1
+#define OTA_MAX_ATTEMPTS  5
+#define OTA_RETRY_DELAY_MS  10000
+#define OTA_BASE_URL \
+    "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/slave_c3_supermini_v%d.bin"
+
+// ─── ESP-NOW Message Types ────────────────────────────────────────────────────
+#define MSG_HELLO       0x01  // slave → master: announce version (unencrypted OK)
+#define MSG_ACK         0x02  // master → slave: version ok
+#define MSG_REJECT      0x03  // master → slave: version outdated, OTA incoming
+#define MSG_OTA_NOW     0x04  // master → all slaves: trigger OTA to target_version
+#define MSG_OTA_FAILED  0x05  // slave → master: OTA attempt failed
+#define MSG_CMD         0x10  // master → slave: LED command (wraps esp_now_cmd_t)
+#define MSG_STATUS      0x11  // slave → master: status reply (wraps esp_now_status_t)
+
+// ─── ESP-NOW Command Bytes (CMD_* used inside MSG_CMD payload) ────────────────
 #define CMD_SET_BRIGHTNESS  0x01
 #define CMD_TURN_ON         0x02
 #define CMD_TURN_OFF        0x03
@@ -66,12 +82,22 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 // ─── ESP-NOW Packet Structures ────────────────────────────────────────────────
 // Packed to prevent compiler padding from misaligning bytes on the wire.
 
+// Envelope header — all messages start with this (9 bytes)
+typedef struct __attribute__((packed)) {
+    uint8_t msg_type;    // MSG_* above
+    uint8_t fw_version;  // sender's firmware version
+    uint8_t attempt;     // OTA retry count (0 for non-OTA messages)
+    uint8_t mac[6];      // sender MAC address
+} espnow_header_t;
+
+// Master → Slave LED command payload (inside MSG_CMD)
 typedef struct __attribute__((packed)) {
     uint8_t spot_id;     // 0xFF = broadcast
     uint8_t brightness;  // 0–255
     uint8_t command;     // CMD_* values above
 } esp_now_cmd_t;
 
+// Slave → Master status payload (inside MSG_STATUS)
 typedef struct __attribute__((packed)) {
     uint8_t spot_id;
     uint8_t brightness;
@@ -79,3 +105,21 @@ typedef struct __attribute__((packed)) {
     uint8_t thermal_state;  // THERMAL_* values above
     bool    is_on;
 } esp_now_status_t;
+
+// Full MSG_CMD packet (master → slave)
+typedef struct __attribute__((packed)) {
+    espnow_header_t header;
+    esp_now_cmd_t   cmd;
+} espnow_cmd_packet_t;
+
+// Full MSG_STATUS packet (slave → master)
+typedef struct __attribute__((packed)) {
+    espnow_header_t  header;
+    esp_now_status_t status;
+} espnow_status_packet_t;
+
+// Full MSG_OTA_NOW packet (master → all slaves)
+typedef struct __attribute__((packed)) {
+    espnow_header_t header;
+    uint8_t         target_version;
+} espnow_ota_packet_t;

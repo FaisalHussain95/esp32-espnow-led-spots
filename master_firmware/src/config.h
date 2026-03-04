@@ -1,6 +1,12 @@
 #pragma once
 #include <stdint.h>
 
+// ─── UART2 Bridge (to WiFi ESP32-B) ──────────────────────────────────────────
+// GPIO13 = TX → ESP32-B RX
+// GPIO35 = RX ← ESP32-B TX  (input-only pin, safe at boot, no strapping role)
+#define PIN_UART2_TX  13
+#define PIN_UART2_RX  35
+
 // ─── Spot MAC Table ───────────────────────────────────────────────────────────
 // Index 0 = spot 0x01, index 1 = spot 0x02, ... index 9 = spot 0x0A
 // Fill in each spot's MAC after reading it from the spot's boot log.
@@ -22,6 +28,19 @@ static const uint8_t SPOT_MACS[10][6] = {
 // ESP-NOW broadcast address (sends to all peers in range)
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+// ─── Firmware Version ─────────────────────────────────────────────────────────
+#define FW_VERSION  1   // Master firmware version (for reference)
+
+// ─── ESP-NOW Message Types ────────────────────────────────────────────────────
+// Must match spot_firmware/src/config.h exactly.
+#define MSG_HELLO       0x01
+#define MSG_ACK         0x02
+#define MSG_REJECT      0x03
+#define MSG_OTA_NOW     0x04
+#define MSG_OTA_FAILED  0x05
+#define MSG_CMD         0x10
+#define MSG_STATUS      0x11
+
 // ─── ESP-NOW Command Bytes ────────────────────────────────────────────────────
 #define CMD_SET_BRIGHTNESS  0x01
 #define CMD_TURN_ON         0x02
@@ -37,15 +56,37 @@ static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 // Must match spot_firmware/src/config.h exactly — same wire format.
 
 typedef struct __attribute__((packed)) {
-    uint8_t spot_id;     // 0xFF = broadcast all
-    uint8_t brightness;  // 0–255
-    uint8_t command;     // CMD_* values above
+    uint8_t msg_type;
+    uint8_t fw_version;
+    uint8_t attempt;
+    uint8_t mac[6];
+} espnow_header_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t spot_id;
+    uint8_t brightness;
+    uint8_t command;
 } esp_now_cmd_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t spot_id;
     uint8_t brightness;
     float   temperature;
-    uint8_t thermal_state;  // THERMAL_* values above
+    uint8_t thermal_state;
     bool    is_on;
 } esp_now_status_t;
+
+typedef struct __attribute__((packed)) {
+    espnow_header_t header;
+    esp_now_cmd_t   cmd;
+} espnow_cmd_packet_t;
+
+typedef struct __attribute__((packed)) {
+    espnow_header_t  header;
+    esp_now_status_t status;
+} espnow_status_packet_t;
+
+typedef struct __attribute__((packed)) {
+    espnow_header_t header;
+    uint8_t         target_version;
+} espnow_ota_packet_t;
