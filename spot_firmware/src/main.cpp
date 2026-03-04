@@ -23,7 +23,7 @@ void setup() {
     Serial.printf("[BOOT] Spot node ID=0x%02X\n", SPOT_ID);
 
     pinMode(PIN_STATUS_LED, OUTPUT);
-    digitalWrite(PIN_STATUS_LED, LOW);
+    digitalWrite(PIN_STATUS_LED, STATUS_LED_OFF);
 
     analogReadResolution(12);       // 12-bit → 0–4095
     analogRead(PIN_NTC_ADC);        // Dummy read to initialise the ADC channel
@@ -150,7 +150,7 @@ static void updateStatusLED() {
     if (now < phase_end_ms) return;  // Still in current phase
 
     if (g_thermal_state == THERMAL_THROTTLE) {
-        digitalWrite(PIN_STATUS_LED, HIGH);
+        digitalWrite(PIN_STATUS_LED, STATUS_LED_ON);
         led_on       = true;
         phase_end_ms = now + STATUS_LED_ON_MS;  // Re-check every 1 s (solid on)
         return;
@@ -158,7 +158,7 @@ static void updateStatusLED() {
 
     // Toggle and schedule next phase
     led_on = !led_on;
-    digitalWrite(PIN_STATUS_LED, led_on ? HIGH : LOW);
+    digitalWrite(PIN_STATUS_LED, led_on ? STATUS_LED_ON : STATUS_LED_OFF);
 
     if (g_thermal_state == THERMAL_CRITICAL) {
         phase_end_ms = now + 100;               // Fast blink: 100 ms per phase

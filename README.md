@@ -14,36 +14,38 @@ Each spot has isolated AC/DC conversion, PWM dimming, NTC thermal monitoring, an
   - 5W → 15–18V
   - 7W → 21–25V
   - 10W → 30–34V
-- **Target: 5W max @ 15V, ~333mA**
+- **Target: 5W max @ 24V, ~303mA (set by Rsense=0.33Ω)**
 
 ### Power Chain (per spot)
 ```
-220VAC → HLK-PM15 → 15VDC → COB LED (via MOSFET PWM)
-                   → MP1584 buck → 3.3VDC → ESP32
+220VAC → HLK-PM24 → 24VDC → PT4115 (CC driver, Rsense=0.33Ω) → COB LED
+                   → MP1584 buck → 3.3VDC → ESP32-C3 SuperMini
+                                                  │
+                                             GPIO10 (PWM 10kHz) → PT4115 DIM pin
 ```
 
 | Stage | Input | Output | Loss | Efficiency |
 |---|---|---|---|---|
-| HLK-PM15 (AC/DC) | 220VAC | 15VDC | ~1.5W | ~77% |
-| Buck 15V→3.3V (MP1584) | 15V | 3.3V | ~0.3W | ~85% |
+| HLK-PM24 (AC/DC) | 220VAC | 24VDC | ~1.5W | ~77% |
+| Buck 24V→3.3V (MP1584) | 24V | 3.3V | ~0.4W | ~83% |
 | ESP32 active + ESP-NOW TX | 3.3V | — | ~0.3W | — |
-| MOSFET switching loss | — | — | ~0.1W | — |
-| COB LED at 5W | 15V@333mA | 5W light | ~1W heat | ~83% |
+| PT4115 driver loss | 24V@303mA | ~5W | ~2.3W | ~68% |
+| COB LED at 5W | — | 5W light | ~1W heat | ~83% |
 | NTC + voltage divider leakage | — | — | ~0.03W | — |
-| **Total per spot from mains** | | | **~7.2W** | |
+| **Total per spot from mains** | | | **~9.5W** | |
 
-**All 10 spots: ~72–75W total wall consumption**
+**All 10 spots: ~90–95W total wall consumption**
 
 ### Components (per spot)
 
 | Component | Value/Model | Notes |
 |---|---|---|
-| AC/DC converter | HLK-PM15 | 220VAC → 15VDC, 1A, isolated |
-| Buck converter | MP1584 module | 15V → 3.3V for ESP32 |
+| AC/DC converter | HLK-PM24 | 220VAC → 24VDC, 1A, isolated |
+| Buck converter | MP1584 module | 24V → 3.3V for ESP32 |
 | Microcontroller | ESP32-C3 SuperMini | Final. WROVER for prototyping |
-| MOSFET | IRLZ44N | Logic-level N-channel |
-| Gate resistor | 100Ω | Between ESP32 GPIO and MOSFET gate |
-| Flyback diode | 1N4007 | Across COB |
+| LED driver | PT4115 | Constant-current buck driver, DIM pin PWM control |
+| Rsense | 0.33Ω 1W | Sets Iout ≈ 303mA (Iout = 0.1 / Rsense) |
+| Flyback diode | 1N4007 | Freewheeling diode across COB (buck topology) |
 | Thermal sensor | NTC 10kΩ 0402 | On COB PCB, B=3950 |
 | NTC divider resistor | 5.1kΩ | Fixed resistor to 3.3V |
 | Noise filter cap | 100nF ceramic | On ADC signal wire to GND |
@@ -61,7 +63,7 @@ NTC 0402 SMD fits flush. Cable runs back to ESP32 ADC with noise filtering.
  │
 [NTC 10kΩ]
  │
- ├──► ADC GPIO (GPIO34 on WROVER / GPIO1 on C3)
+ ├──► ADC GPIO (GPIO34 on WROVER / GPIO3 on C3)
  │                          │
  │                        [100nF]
  │                          │
@@ -77,20 +79,20 @@ GND
 
 **Expected ADC value at 25°C room temperature: ~1375** (out of 4095)
 
-### MOSFET Wiring
+### PT4115 Wiring
 ```
-15V rail ──► COB+ ──► COB- ──► MOSFET Drain
-                                MOSFET Source ──► GND
-ESP32 GPIO ──► 100Ω ──► MOSFET Gate
+24V rail ──► PT4115 VIN
+             PT4115 SW ──► inductor ──► COB+ ──► COB- ──► PT4115 CS ──► 0.33Ω ──► GND
+ESP32 GPIO10 ──► PT4115 DIM   (PWM 10kHz)
 ```
 
 ### Full Per-Spot Schematic (simplified)
 ```
-220VAC ──► HLK-PM15 ──► 15V rail ──► COB+ ──► COB- ──► MOSFET Drain
-                │                                              │
-                └──► Buck (15V→3.3V) ──► ESP32               MOSFET Source ──► GND
+220VAC ──► HLK-PM24 ──► 24V rail ──► PT4115 VIN
+                │                    PT4115 SW ──► L ──► COB+ ──► COB- ──► 0.33Ω ──► GND
+                └──► Buck (15V→3.3V) ──► ESP32-C3
                                               │
-                                         GPIO (PWM) ──► 100Ω ──► MOSFET Gate
+                                         GPIO10 (PWM) ──► PT4115 DIM
 ```
 
 ---
@@ -192,7 +194,7 @@ typedef struct __attribute__((packed)) {
 
 ---
 
-## Status LED (GPIO2)
+## Status LED (GPIO8)
 
 | State | Pattern |
 |---|---|
@@ -215,8 +217,9 @@ typedef struct __attribute__((packed)) {
 ### ESP32-C3 SuperMini (Final)
 | Function | GPIO | Notes |
 |---|---|---|
-| PWM → MOSFET gate | GPIO3 | |
-| NTC ADC | GPIO1 | |
+| PWM → MOSFET gate | GPIO10 | LEDC capable, no ADC, no strapping conflict |
+| NTC ADC | GPIO3 | ADC1_CH3 — safe with ESP-NOW/WiFi active |
+| Status LED | GPIO8 | Onboard blue LED, active LOW |
 
 > All pin assignments are `#define` in `config.h` — porting is just changing those values.
 
@@ -273,7 +276,7 @@ On ESP32 Arduino core, `analogSetPinAttenuation()` only takes effect after the A
 ## Validation Workflow
 
 1. Validate NTC voltage divider + RC filter in **Falstad** (falstad.com/circuit)
-2. Prototype firmware on **WROVER** before flashing C3 units
+2. Prototype firmware on **WROVER** before flashing C3 SuperMini units
 3. Draw schematic + PCB layout in **EasyEDA**
 4. Export Gerber + BOM → order on **JLCPCB × 10**
 
@@ -281,7 +284,9 @@ On ESP32 Arduino core, `analogSetPinAttenuation()` only takes effect after the A
 
 ## Next Steps
 
-- [ ] Write master controller firmware
+- [x] Write spot node firmware
+- [x] Write master controller firmware (TTGO LoRa32 + OLED)
+- [x] Port spot firmware to ESP32-C3 SuperMini (pin defines + board updated in platformio.ini)
 - [ ] Draw schematic in EasyEDA
 - [ ] PCB layout → JLCPCB quote
 - [ ] Print test enclosures in PLA

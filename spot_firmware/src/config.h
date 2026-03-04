@@ -8,15 +8,23 @@
 // Placeholder: replace with actual master MAC (run WiFi.macAddress() on master)
 static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 
-// ─── GPIO Pin Assignments (ESP32 WROVER prototype) ────────────────────────────
-#define PIN_PWM_OUT     18   // LEDC output → 100Ω → IRLZ44N gate
-#define PIN_NTC_ADC     34   // ADC1_CH6, input-only pin — no internal pull
-#define PIN_STATUS_LED   2   // Onboard LED, active HIGH
+// ─── GPIO Pin Assignments ─────────────────────────────────────────────────────
+// ESP32 WROVER (prototype)
+// #define PIN_PWM_OUT     18   // LEDC output → PT4115 DIM pin
+// #define PIN_NTC_ADC     34   // ADC1_CH6, input-only pin — no internal pull
+// #define PIN_STATUS_LED   2   // Onboard LED, active HIGH
+
+// ESP32-C3 SuperMini (final)
+#define PIN_PWM_OUT     10   // LEDC output → PT4115 DIM pin (no ADC, no strapping)
+#define PIN_NTC_ADC      3   // ADC1_CH3 — safe with ESP-NOW/WiFi active (ADC1 only)
+#define PIN_STATUS_LED   8   // Onboard blue LED, active LOW
+#define STATUS_LED_ON   LOW  // GPIO8 onboard LED lights when driven LOW
+#define STATUS_LED_OFF  HIGH
 
 // ─── LEDC (PWM) Configuration ─────────────────────────────────────────────────
 #define LEDC_CHANNEL     0
 #define LEDC_TIMER       0
-#define LEDC_FREQ_HZ  10000  // 10 kHz — inaudible, suitable for IRLZ44N gate
+#define LEDC_FREQ_HZ  10000  // 10 kHz — inaudible, within PT4115 DIM pin range
 #define LEDC_RESOLUTION  8   // 8-bit → duty range 0–255
 
 // ─── NTC / ADC Configuration ──────────────────────────────────────────────────

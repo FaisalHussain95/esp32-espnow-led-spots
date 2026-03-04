@@ -19,3 +19,21 @@ gerber*/
 # OS
 .DS_Store
 Thumbs.db
+
+# Kicad
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.kicad_mod-bak
+*.kicad_wks-bak
+*.kicad_pro-bak
+*.kicad_sym-bak
+*.kicad_prl-bak
+*.kicad_dcm-bak
+*.kicad_cmp-bak
+*.kicad_net-bak
+*.kicad_3d-bak
+kicad/**/*.lck
+kicad/**/~*
+kicad/**/_autosave*
+kicad/**/fp-info-cache
+kicad/diy_led_spot/diy_led_spot-backups

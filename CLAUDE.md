@@ -4,25 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DIY replacement of 10x 220VAC LED spots with custom COB LED + ESP32-C3 controller units. Each spot has an isolated AC/DC converter, PWM dimming via MOSFET, NTC thermal monitoring, and ESP-NOW wireless control (no WiFi router required).
+DIY replacement of 10x 220VAC LED spots with custom COB LED + ESP32-S2 controller units. Each spot has an isolated AC/DC converter, PWM dimming via MOSFET, NTC thermal monitoring, and ESP-NOW wireless control (no WiFi router required).
 
 ## Firmware Development
 
 ### Toolchain
-- **IDE:** Arduino IDE or PlatformIO (not yet configured — no build files exist yet)
+- **IDE:** PlatformIO
 - **Target MCU:** ESP32-C3 SuperMini (final), ESP32 WROVER (prototype/testing)
-- **Simulation:** [Wokwi](https://wokwi.com) for ESP32-C3 firmware + ESP-NOW before flashing real hardware
+- **Master node:** TTGO LoRa32 V1.0/V1.2 (ESP32 + SSD1306 OLED 128×64)
 
-### Planned Firmware Structure
+### Firmware Structure
 
 ```
 spot_firmware/
-└── main/
-    ├── main.ino           # Setup, main loop, command handler, thermal policy
+├── platformio.ini
+└── src/
+    ├── main.cpp           # Setup, main loop, command handler, thermal policy, status LED
     ├── config.h           # All pin defines, thresholds, SPOT_ID — edit to port per unit
-    ├── thermal.h          # NTC reading, Steinhart-Hart conversion, throttle logic
-    ├── dimming.h          # PWM setup, fadeTo, brightness control
-    └── espnow_manager.h   # ESP-NOW init, packet structs, send/receive handlers
+    ├── thermal.h/.cpp     # NTC reading, Steinhart-Hart conversion, throttle logic
+    ├── dimming.h/.cpp     # LEDC init, setBrightness(), fadeTo()
+    └── espnow_manager.h/.cpp  # ESP-NOW init, peer registration, send/receive
+
+master_firmware/
+├── platformio.ini
+└── src/
+    ├── config.h           # Spot MAC table, packet structs
+    └── main.cpp           # OLED display, serial command parser, ESP-NOW master
 ```
 
 **Porting to a new unit:** only `config.h` needs changing — update `SPOT_ID` (0x01–0x0A) and `MASTER_MAC[]`.
@@ -31,17 +38,19 @@ spot_firmware/
 
 ### Power Chain (per spot)
 ```
-220VAC → HLK-PM15 → 15VDC → COB LED (via IRLZ44N MOSFET, PWM)
-                   → MP1584 buck → 3.3VDC → ESP32-C3
+220VAC → HLK-PM24 → 24VDC → PT4115 (CC driver, Rsense=0.33Ω) → COB LED
+                   → MP1584 buck → 3.3VDC → ESP32-C3 SuperMini
+                                                 │
+                                            GPIO10 (PWM) → PT4115 DIM pin
 ```
 
 ### GPIO Pin Mapping
 
 | Function | WROVER (prototype) | C3 SuperMini (final) |
 |---|---|---|
-| PWM → MOSFET gate | GPIO18 (10kHz) | GPIO3 |
-| NTC ADC | GPIO34 (input-only) | GPIO1 |
-| Status LED | GPIO2 | — |
+| PWM → PT4115 DIM | GPIO18 (10kHz) | GPIO10 |
+| NTC ADC | GPIO34 (input-only) | GPIO3 (ADC1_CH3) |
+| Status LED | GPIO2 | GPIO8 (onboard blue LED, active LOW) |
 
 ### NTC Temperature Sensing
 - Voltage divider: NTC 10kΩ MF52 (B=3950) to 3.3V, 5.1kΩ fixed resistor to GND
@@ -85,30 +94,29 @@ typedef struct {
 ### Key Components (per spot)
 | Component | Value/Model | Purpose |
 |---|---|---|
-| AC/DC | HLK-PM15 | 220VAC → 15VDC, 1A, isolated |
-| Buck | MP1584 module | 15V → 3.3V for ESP32 |
-| MCU | ESP32-C3 SuperMini | Control + wireless |
-| MOSFET | IRLZ44N | Logic-level N-ch, PWM-driven LED |
-| Gate resistor | 100Ω | Between GPIO and MOSFET gate |
-| Flyback diode | 1N4007 | Across COB LED |
+| AC/DC | HLK-PM24 | 220VAC → 24VDC, 1A, isolated |
+| Buck | MP1584 module | 24V → 3.3V for ESP32 |
+| MCU | ESP32-C3 SuperMini | Control + wireless, WiFi + BLE 5.0, native USB, RISC-V |
+| LED driver | PT4115 | Constant-current buck driver, DIM pin PWM control |
+| Rsense | 0.33Ω 1W | Sets Iout = 0.1 / 0.33 ≈ 303mA (≈ 0.1/Rsense formula) |
+| Flyback diode | 1N4007 | Across COB LED (freewheeling diode for buck) |
 | Heatsink | 25×25mm pin-grid 6×6, 13mm | θsa ~19°C/W — gives 51°C margin at 50°C ambient |
 
-### MOSFET Wiring
+### PT4115 Wiring
 ```
-15V → COB+ → COB- → MOSFET Drain
-                     MOSFET Source → GND
-ESP32 GPIO → 100Ω → MOSFET Gate
+15V → PT4115 VIN
+PT4115 SW → inductor → COB+ → COB- → PT4115 CS → Rsense (0.33Ω) → GND
+ESP32 GPIO10 → PT4115 DIM   (PWM 10kHz, 0–100% duty = 0–full current)
 ```
 
 ## PCB & Manufacturing
 
 - **Design tool:** EasyEDA (linked to JLCPCB + LCSC)
 - **Strategy:** Design 1 unit, validate, order ×10
-- **Assembly:** Hybrid — JLCPCB SMT for passives; hand-solder HLK-PM15, ESP32, MOSFET
+- **Assembly:** Hybrid — JLCPCB SMT for passives; hand-solder HLK-PM24, ESP32, PT4115
 
 ## Validation Workflow
 
 1. Validate NTC divider + RC filter in **Falstad** (falstad.com/circuit)
-2. Test firmware + ESP-NOW in **Wokwi** (wokwi.com) before touching hardware
-3. Prototype on **WROVER** before flashing ESP32-C3 units
-4. Draw schematic + PCB in **EasyEDA** → export Gerber + BOM → JLCPCB
+2. Prototype on **WROVER** before flashing ESP32-C3 SuperMini units
+3. Draw schematic + PCB in **EasyEDA** → export Gerber + BOM → JLCPCB
