@@ -40,6 +40,8 @@ jobs:
         env:
           # Inject a placeholder PMK so the build succeeds without real credentials.
           # Real credentials are set via menuconfig before flashing real devices.
+          # Inject placeholder credentials so all three targets build without real secrets.
+          # Duplicates with platformio.ini are harmless — last definition wins in GCC.
           PLATFORMIO_BUILD_FLAGS: >-
             -DCONFIG_ESPNOW_PMK=\"00000000000000000000000000000000\"
             -DCONFIG_WIFI_SSID=\"placeholder\"

@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <HTTPUpdate.h>
+#include <WiFiClientSecure.h>
 #include "config.h"
 
 // ─── MQTT + WiFi clients ──────────────────────────────────────────────────────
@@ -156,7 +158,37 @@ static void uart2_send_command(uint8_t spot_id, uint8_t command, uint8_t brightn
 static void uart2_send_version(uint8_t target_version) {
     uint8_t frame[4] = {UART2_START, UART2_VERSION, target_version, UART2_END};
     Serial2.write(frame, sizeof(frame));
-    Serial.printf("[MQTT→UART2] OTA version=%d\n", target_version);
+    Serial.printf("[UART2] VERSION frame sent → master (target=%d)\n", target_version);
+}
+
+// ─── Self-OTA ─────────────────────────────────────────────────────────────────
+// URL: https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>/wifi_bridge_v<N>.bin
+#define BRIDGE_OTA_URL_FMT \
+    "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/wifi_bridge_v%d.bin"
+
+static void bridge_ota_start(uint8_t target_version) {
+    Serial.printf("[OTA] Bridge self-update to v%d\n", target_version);
+
+    char url[200];
+    snprintf(url, sizeof(url), BRIDGE_OTA_URL_FMT, target_version, target_version);
+
+    WiFiClientSecure client;
+    client.setInsecure();  // GitHub redirects to CDN; skip cert validation
+
+    t_httpUpdate_return ret = httpUpdate.update(client, url);
+
+    switch (ret) {
+        case HTTP_UPDATE_FAILED:
+            Serial.printf("[OTA] Update failed: %s\n", httpUpdate.getLastErrorString().c_str());
+            break;
+        case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("[OTA] No update available");
+            break;
+        case HTTP_UPDATE_OK:
+            Serial.println("[OTA] Update OK — rebooting");
+            // httpUpdate triggers ESP.restart() automatically
+            break;
+    }
 }
 
 static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
@@ -171,7 +203,16 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
         char *ver_ptr = strstr(msg, "\"version\":");
         if (ver_ptr) {
             uint8_t target = (uint8_t)atoi(ver_ptr + 10);
-            if (target >= 1) uart2_send_version(target);
+            if (target >= 1) {
+                if (FW_VERSION < target) {
+                    // Self-OTA first. On reboot, setup() sends VERSION frame to master,
+                    // master self-OTAs if needed, then broadcasts WHOIS to trigger spots.
+                    bridge_ota_start(target);
+                } else {
+                    // Bridge already up to date — forward version frame to master directly.
+                    uart2_send_version(target);
+                }
+            }
         }
         return;
     }
@@ -226,6 +267,11 @@ void setup() {
     mqtt.setBufferSize(512);
 
     mqtt_connect();
+
+    // Send current firmware version to master on every boot.
+    // Master compares against its own FW_VERSION and self-OTAs if needed,
+    // then broadcasts WHOIS to check spot versions.
+    uart2_send_version(FW_VERSION);
 
     Serial.println("[BOOT] Ready.");
 }

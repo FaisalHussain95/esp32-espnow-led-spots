@@ -23,6 +23,9 @@
 #define MQTT_CLIENT_ID     "led-spots-bridge"
 #define NUM_SPOTS          10
 
+// ─── Firmware Version ─────────────────────────────────────────────────────────
+#define FW_VERSION  1
+
 // ─── UART2 frame bytes (must match master_firmware) ───────────────────────────
 #define UART2_START    0xAA
 #define UART2_END      0x55

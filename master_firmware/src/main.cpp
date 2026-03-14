@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <Preferences.h>
+#include <HTTPUpdate.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include <Wire.h>
@@ -145,6 +146,17 @@ static void provisioning_init() {
         }
         prefs.putBytes("pmk", _pmk, 16);
         Serial.println("[PROV] PMK written to NVS from build_flags.");
+    }
+    prefs.end();
+
+    // ── WiFi credentials (for OTA HTTP) ───────────────────────────────────────
+    prefs.begin("wifi", false);
+    if (!prefs.isKey("ssid")) {
+        prefs.putString("ssid",     CONFIG_WIFI_SSID);
+        prefs.putString("password", CONFIG_WIFI_PASSWORD);
+        Serial.println("[PROV] WiFi credentials written to NVS from build_flags.");
+    } else {
+        Serial.println("[PROV] WiFi credentials loaded from NVS.");
     }
     prefs.end();
 
@@ -321,6 +333,75 @@ static void updateOLED() {
     oled.display();
 }
 
+// ─── OTA (self-update from GitHub releases) ───────────────────────────────────
+// URL: https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>/master_ttgo_v<N>.bin
+#define MASTER_OTA_URL_FMT \
+    "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/master_ttgo_v%d.bin"
+
+static void master_ota_start(uint8_t target_version) {
+    Serial.printf("[OTA] Master self-update to v%d\n", target_version);
+
+    // Read WiFi creds from NVS
+    Preferences prefs;
+    prefs.begin("wifi", true);
+    String ssid     = prefs.getString("ssid",     "");
+    String password = prefs.getString("password", "");
+    prefs.end();
+
+    if (ssid.isEmpty()) {
+        Serial.println("[OTA] No WiFi credentials in NVS — cannot self-update");
+        return;
+    }
+
+    // Temporarily stop ESP-NOW and connect to WiFi
+    esp_now_deinit();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    Serial.printf("[OTA] Connecting to WiFi '%s'", ssid.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[OTA] WiFi connect failed — aborting self-update");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_STA);
+        return;
+    }
+
+    Serial.printf("[OTA] Connected. Starting HTTP update...\n");
+
+    char url[200];
+    snprintf(url, sizeof(url), MASTER_OTA_URL_FMT, target_version, target_version);
+
+    WiFiClientSecure client;
+    client.setInsecure();  // GitHub redirects to CDN; skip cert validation for now
+
+    httpUpdate.setLedPin(LED_BUILTIN, LOW);
+    t_httpUpdate_return ret = httpUpdate.update(client, url);
+
+    switch (ret) {
+        case HTTP_UPDATE_FAILED:
+            Serial.printf("[OTA] Update failed: %s\n", httpUpdate.getLastErrorString().c_str());
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_STA);
+            break;
+        case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("[OTA] No update available");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_STA);
+            break;
+        case HTTP_UPDATE_OK:
+            Serial.println("[OTA] Update OK — rebooting");
+            // httpUpdate triggers ESP.restart() automatically
+            break;
+    }
+}
+
 // ─── UART2 bridge (to WiFi ESP32-B) ──────────────────────────────────────────
 // Frame format (command, 6 bytes):  0xAA 0x01 spot_id brightness command 0x55
 // Frame format (status,  9 bytes):  0xAA 0x02 spot_id brightness temp_hi temp_lo thermal_state is_on 0x55
@@ -364,14 +445,24 @@ static void uart2_poll() {
             // Version frame: 0xAA 0x03 target_version 0x55
             if (_u2buf[3] == UART2_END) {
                 uint8_t target = _u2buf[2];
-                Serial.printf("[UART2] VERSION target=%d\n", target);
-                // Save to NVS and broadcast OTA
+                Serial.printf("[UART2] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
+
+                // Save required slave version to NVS
                 Preferences prefs;
                 prefs.begin("config", false);
                 prefs.putUChar("fw_version", target);
                 prefs.end();
                 _required_fw_version = target;
-                sendOtaBroadcast(target);
+
+                if (FW_VERSION < target) {
+                    // Self-update first — on reboot, bridge will resend VERSION frame
+                    // and master will then be up to date and broadcast WHOIS to spots.
+                    master_ota_start(target);
+                } else {
+                    // Master already up to date — trigger spot updates via WHOIS.
+                    // Spots reply HELLO → master checks their version → ACK or REJECT+OTA.
+                    sendWhois();
+                }
             }
             _u2len = 0;
         } else if (_u2len == 6) {
@@ -397,7 +488,7 @@ static void printHelp() {
     Serial.println("  off     <spot|all>         Turn off");
     Serial.println("  dim     <spot|all> <bri>   Set brightness 0..255");
     Serial.println("  status  <spot|all>         Request status reply");
-    Serial.println("  version <N>                Set required fw version, broadcast OTA");
+    Serial.println("  version <N>                Self-OTA if master outdated, then WHOIS → spots update");
     Serial.println("  help                       This message");
     Serial.println("  <spot>: 1-254  or  all");
 }
@@ -470,8 +561,12 @@ static void processLine(char *line) {
         prefs.putUChar("fw_version", target);
         prefs.end();
         _required_fw_version = target;
-        Serial.printf("[CMD] VERSION target=%d — broadcasting OTA_NOW\n", target);
-        sendOtaBroadcast(target);
+        Serial.printf("[CMD] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
+        if (FW_VERSION < target) {
+            master_ota_start(target);
+        } else {
+            sendWhois();
+        }
         return;
     }
 
