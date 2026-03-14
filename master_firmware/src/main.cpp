@@ -284,6 +284,9 @@ static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spo
         sendReject(mac, _required_fw_version);
         Serial.printf("[HELLO] → REJECT + OTA target=%d\n", _required_fw_version);
     }
+
+    // Notify bridge (UART2) of handshake
+    uart2_send_handshake(spot_id, spot_fw_version);
 }
 
 // ─── OLED display ─────────────────────────────────────────────────────────────
@@ -449,11 +452,18 @@ static void master_ota_start(uint8_t target_version) {
 // Frame format (status,  9 bytes):  0xAA 0x02 spot_id brightness temp_hi temp_lo thermal_state is_on 0x55
 //   temperature encoded as int16 in 0.1°C units (e.g. 24.3°C → 243)
 // Frame format (version, 4 bytes):  0xAA 0x03 target_version 0x55
-#define UART2_START   0xAA
-#define UART2_END     0x55
-#define UART2_CMD     0x01
-#define UART2_STATUS  0x02
-#define UART2_VERSION 0x03
+#define UART2_START     0xAA
+#define UART2_END       0x55
+#define UART2_CMD       0x01
+#define UART2_STATUS    0x02
+#define UART2_VERSION   0x03
+#define UART2_HANDSHAKE 0x04
+
+// Frame: 0xAA 0x04 spot_id fw_version 0x55
+static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version) {
+    uint8_t frame[5] = { UART2_START, UART2_HANDSHAKE, spot_id, fw_version, UART2_END };
+    Serial2.write(frame, 5);
+}
 
 static void uart2_send_status(const esp_now_status_t &s) {
     int16_t temp_raw = (int16_t)(s.temperature * 10.0f);

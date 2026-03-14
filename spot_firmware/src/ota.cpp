@@ -1,17 +1,14 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
-#include <Preferences.h>
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
+#include <lwip/dns.h>
+#include <lwip/ip_addr.h>
+#include <Preferences.h>
 #include "ota.h"
 #include "config.h"
 #include "espnow_manager.h"
-
-static void notify_master_ota_failed(uint8_t attempt) {
-    // ESP-NOW is deinited during OTA — notify after re-init at end of ota_start()
-    (void)attempt;
-}
 
 void ota_start(uint8_t target_version) {
     Serial.printf("[OTA] Starting — target version %d\n", target_version);
@@ -51,24 +48,42 @@ void ota_start(uint8_t target_version) {
                 Serial.print(".");
             }
             Serial.println();
-            if (WiFi.status() == WL_CONNECTED) {
-                // Force Cloudflare DNS — router DNS can be unreliable for github.com
-                WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
-                            IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
-            }
         }
 
         if (WiFi.status() != WL_CONNECTED) {
             Serial.printf("[OTA] WiFi connect failed — SSID='%s' password='%s'\n",
                           ssid.c_str(), password.c_str());
-            notify_master_ota_failed(attempt);
             if (attempt < OTA_MAX_ATTEMPTS) {
                 Serial.printf("[OTA] Retrying in %ds...\n", OTA_RETRY_DELAY_MS / 1000);
                 delay(OTA_RETRY_DELAY_MS);
             }
             continue;
         }
-        Serial.printf("[OTA] WiFi OK. IP: %s\n", WiFi.localIP().toString().c_str());
+
+        // Force Cloudflare DNS — both Arduino layer and lwIP layer
+        WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
+                    IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
+        ip_addr_t dns1, dns2;
+        ipaddr_aton("1.1.1.1", &dns1);
+        ipaddr_aton("1.0.0.1", &dns2);
+        dns_setserver(0, &dns1);
+        dns_setserver(1, &dns2);
+        delay(500);
+
+        // Verify DNS works before attempting OTA
+        IPAddress resolved;
+        if (!WiFi.hostByName("github.com", resolved)) {
+            Serial.println("[OTA] DNS resolve github.com failed — retrying");
+            if (attempt < OTA_MAX_ATTEMPTS) {
+                WiFi.disconnect(true);
+                delay(OTA_RETRY_DELAY_MS);
+            }
+            continue;
+        }
+
+        Serial.printf("[OTA] WiFi OK. IP: %s  DNS OK: github.com=%s  free heap: %u\n",
+                      WiFi.localIP().toString().c_str(),
+                      resolved.toString().c_str(), ESP.getFreeHeap());
 
         WiFiClientSecure client;
         client.setInsecure();
@@ -76,27 +91,23 @@ void ota_start(uint8_t target_version) {
         t_httpUpdate_return result = httpUpdate.update(client, url);
 
         switch (result) {
+            case HTTP_UPDATE_OK:
+                Serial.println("[OTA] Success — restarting.");
+                ESP.restart();
+                return;
+            case HTTP_UPDATE_NO_UPDATES:
+                Serial.println("[OTA] Server says no update available.");
+                WiFi.disconnect(true);
+                espnow_init();
+                return;
             case HTTP_UPDATE_FAILED:
                 Serial.printf("[OTA] Attempt %d failed: %s\n",
                               attempt, httpUpdate.getLastErrorString().c_str());
-                notify_master_ota_failed(attempt);
                 if (attempt < OTA_MAX_ATTEMPTS) {
                     Serial.printf("[OTA] Retrying in %ds...\n", OTA_RETRY_DELAY_MS / 1000);
                     delay(OTA_RETRY_DELAY_MS);
                 }
                 break;
-
-            case HTTP_UPDATE_NO_UPDATES:
-                Serial.println("[OTA] Server says no update available.");
-                notify_master_ota_failed(attempt);
-                WiFi.disconnect(true);
-                espnow_init();
-                return;
-
-            case HTTP_UPDATE_OK:
-                Serial.println("[OTA] Success — restarting.");
-                ESP.restart();
-                return;
         }
     }
 
