@@ -57,6 +57,7 @@ static esp_now_status_t g_spot_state[NUM_SPOTS] = {};
 // ─── Forward declarations ──────────────────────────────────────────────────────
 static void addPeer(const uint8_t *mac);
 static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness);
+static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version);
 
 // ─── ESP-NOW callbacks ────────────────────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
