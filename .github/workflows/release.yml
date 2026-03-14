@@ -14,10 +14,10 @@ jobs:
           - env: esp32c3supermini
             dir: spot_firmware
             artifact: slave_c3_supermini
-          - env: ttgo-lora32-v1
+          - env: ttgo-lora32
             dir: master_firmware
             artifact: master_ttgo
-          - env: esp32dev
+          - env: wifi-bridge
             dir: wifi_bridge_firmware
             artifact: wifi_bridge
 
