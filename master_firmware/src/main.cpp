@@ -379,9 +379,10 @@ static void master_ota_start(uint8_t target_version) {
     snprintf(url, sizeof(url), MASTER_OTA_URL_FMT, target_version, target_version);
 
     WiFiClientSecure client;
-    client.setInsecure();  // GitHub redirects to CDN; skip cert validation for now
+    client.setInsecure();  // skip cert validation (GitHub CDN)
 
     httpUpdate.setLedPin(LED_BUILTIN, LOW);
+    httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
     t_httpUpdate_return ret = httpUpdate.update(client, url);
 
     switch (ret) {

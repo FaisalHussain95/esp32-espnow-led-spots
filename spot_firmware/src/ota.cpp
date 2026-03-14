@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
-#include <HTTPClient.h>
 #include <HTTPUpdate.h>
+#include <WiFiClientSecure.h>
 #include "ota.h"
 #include "config.h"
 #include "espnow_manager.h"
@@ -51,7 +51,9 @@ void ota_start(uint8_t target_version) {
     for (uint8_t attempt = 1; attempt <= OTA_MAX_ATTEMPTS; attempt++) {
         Serial.printf("[OTA] Attempt %d/%d...\n", attempt, OTA_MAX_ATTEMPTS);
 
-        WiFiClient client;
+        WiFiClientSecure client;
+        client.setInsecure();  // skip cert validation (GitHub CDN)
+        httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
         t_httpUpdate_return result = httpUpdate.update(client, url);
 
         switch (result) {
