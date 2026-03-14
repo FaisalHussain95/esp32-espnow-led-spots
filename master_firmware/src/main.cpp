@@ -329,7 +329,7 @@ static void updateOLED() {
 
     if (row == 0) {
         oled.setCursor(0, 28);
-        oled.print("  Waiting for spots...");
+        oled.print("Waiting for spots...");
     }
 
     oled.display();
