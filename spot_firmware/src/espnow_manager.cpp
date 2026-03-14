@@ -88,7 +88,11 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
 // ─── Send callback ────────────────────────────────────────────────────────────
 static void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
-        Serial.println("[ESPNOW] Send failed");
+        uint8_t pmk[16];
+        provisioning_get_pmk(pmk);
+        Serial.print("[ESPNOW] Send failed  PMK: ");
+        for (int i = 0; i < 16; i++) Serial.printf("%02X", pmk[i]);
+        Serial.println();
     }
 }
 

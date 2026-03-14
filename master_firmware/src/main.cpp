@@ -148,6 +148,9 @@ static void provisioning_init() {
         Serial.println("[PROV] PMK written to NVS from build_flags.");
     }
     prefs.end();
+    Serial.print("[PROV] PMK: ");
+    for (int i = 0; i < 16; i++) Serial.printf("%02X", _pmk[i]);
+    Serial.println();
 
     // ── WiFi credentials (for OTA HTTP) ───────────────────────────────────────
     prefs.begin("wifi", false);
