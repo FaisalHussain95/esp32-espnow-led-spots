@@ -343,6 +343,7 @@ static void updateOLED() {
 static void espnow_reinit() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_STA);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
     if (esp_now_init() != ESP_OK) {
         Serial.println("[ERR] ESP-NOW re-init failed after OTA");
         return;
@@ -380,28 +381,6 @@ static void master_ota_start(uint8_t target_version) {
     // Temporarily stop ESP-NOW and connect to WiFi
     esp_now_deinit();
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    Serial.printf("[OTA] Connecting to WiFi '%s'", ssid.c_str());
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println();
-
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.printf("[OTA] WiFi connect failed — SSID='%s' password='%s'\n",
-                      ssid.c_str(), password.c_str());
-        espnow_reinit();
-        return;
-    }
-
-    // Force Cloudflare DNS — router DNS can be unreliable for github.com
-    WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
-                IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
-
-    Serial.printf("[OTA] Connected. Starting HTTP update...\n");
 
     char url[200];
     snprintf(url, sizeof(url), MASTER_OTA_URL_FMT, target_version, target_version);
@@ -411,15 +390,42 @@ static void master_ota_start(uint8_t target_version) {
 
     for (int attempt = 1; attempt <= 5; attempt++) {
         Serial.printf("[OTA] Attempt %d/5\n", attempt);
+
+        // Connect (or reconnect) to WiFi each attempt
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.printf("[OTA] Connecting to WiFi '%s'", ssid.c_str());
+            WiFi.begin(ssid.c_str(), password.c_str());
+            uint32_t t0 = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
+                delay(500);
+                Serial.print(".");
+            }
+            Serial.println();
+        }
+
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.printf("[OTA] WiFi connect failed — SSID='%s' password='%s'\n",
+                          ssid.c_str(), password.c_str());
+            if (attempt < 5) {
+                Serial.println("[OTA] Retrying in 10s...");
+                delay(10000);
+            }
+            continue;
+        }
+
+        // Force Cloudflare DNS
+        WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
+                    IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
+
         WiFiClientSecure client;
         client.setInsecure();
-        client.setHandshakeTimeout(30);  // GitHub CDN can be slow; default 10s often times out
+        client.setHandshakeTimeout(30);
         t_httpUpdate_return ret = httpUpdate.update(client, url);
 
         switch (ret) {
             case HTTP_UPDATE_OK:
                 Serial.println("[OTA] Update OK — rebooting");
-                return;  // httpUpdate triggers ESP.restart() automatically
+                return;
             case HTTP_UPDATE_NO_UPDATES:
                 Serial.println("[OTA] No update available");
                 espnow_reinit();
@@ -427,7 +433,10 @@ static void master_ota_start(uint8_t target_version) {
             case HTTP_UPDATE_FAILED:
                 Serial.printf("[OTA] Attempt %d failed: %s\n", attempt,
                               httpUpdate.getLastErrorString().c_str());
-                if (attempt < 5) delay(10000);
+                if (attempt < 5) {
+                    Serial.println("[OTA] Retrying in 10s...");
+                    delay(10000);
+                }
                 break;
         }
     }
