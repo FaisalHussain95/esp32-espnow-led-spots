@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <string.h>
 
 // ─── Internal state ───────────────────────────────────────────────────────────
@@ -87,6 +88,8 @@ static void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 void espnow_init() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    Serial.printf("[ESPNOW] WiFi channel: %d\n", WiFi.channel());
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("[ERROR] ESP-NOW init failed");
@@ -123,8 +126,9 @@ void espnow_init() {
     hello.attempt    = SPOT_ID;  // Reuse attempt field to carry spot_id in HELLO
     memcpy(hello.mac, self_mac, 6);
 
-    esp_now_send(BCAST, (uint8_t *)&hello, sizeof(hello));
-    Serial.printf("[ESPNOW] HELLO sent (broadcast) — FW_VERSION=%d SPOT_ID=0x%02X\n", FW_VERSION, SPOT_ID);
+    esp_err_t hello_err = esp_now_send(BCAST, (uint8_t *)&hello, sizeof(hello));
+    Serial.printf("[ESPNOW] HELLO sent (broadcast) — FW_VERSION=%d SPOT_ID=0x%02X  err=0x%x\n",
+                  FW_VERSION, SPOT_ID, hello_err);
 
     // Register master peer with encryption for all subsequent packets
     esp_now_peer_info_t peer = {};
@@ -133,9 +137,8 @@ void espnow_init() {
     peer.encrypt = true;
     memcpy(peer.lmk, pmk, 16);
     peer.ifidx   = WIFI_IF_STA;
-    if (esp_now_add_peer(&peer) != ESP_OK) {
-        Serial.println("[ERROR] Failed to re-add master peer (encrypted)");
-    }
+    esp_err_t add_err = esp_now_add_peer(&peer);
+    Serial.printf("[ESPNOW] Master peer add: err=0x%x  encrypt=%d\n", add_err, peer.encrypt);
 }
 
 void sendStatus(uint8_t brightness, float temperature,
@@ -156,7 +159,10 @@ void sendStatus(uint8_t brightness, float temperature,
     pkt.status.thermal_state = thermal_state;
     pkt.status.is_on         = is_on;
 
-    esp_now_send(MASTER_MAC, (uint8_t *)&pkt, sizeof(pkt));
+    esp_err_t err = esp_now_send(MASTER_MAC, (uint8_t *)&pkt, sizeof(pkt));
+    if (err != ESP_OK) {
+        Serial.printf("[ESPNOW] sendStatus err=0x%x\n", err);
+    }
 }
 
 bool espnow_getCommand(esp_now_cmd_t *cmd) {

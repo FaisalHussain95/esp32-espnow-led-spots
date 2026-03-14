@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <Preferences.h>
 #include <HTTPUpdate.h>
 #include "soc/soc.h"
@@ -624,7 +625,9 @@ void setup() {
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    Serial.printf("[BOOT] Master — MAC: %s\n", WiFi.macAddress().c_str());
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    Serial.printf("[BOOT] Master — MAC: %s  CH: %d\n",
+                  WiFi.macAddress().c_str(), WiFi.channel());
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("[ERR] esp_now_init failed — halting");
