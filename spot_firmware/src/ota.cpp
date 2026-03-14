@@ -9,8 +9,8 @@
 #include "espnow_manager.h"
 
 static void notify_master_ota_failed(uint8_t attempt) {
-    // Send MSG_OTA_FAILED so master/OLED/HA are informed
-    sendStatus(0, -1.0f, THERMAL_NORMAL, false, MSG_OTA_FAILED, attempt);
+    // ESP-NOW is deinited during OTA — notify after re-init at end of ota_start()
+    (void)attempt;
 }
 
 void ota_start(uint8_t target_version) {
@@ -51,6 +51,11 @@ void ota_start(uint8_t target_version) {
                 Serial.print(".");
             }
             Serial.println();
+            if (WiFi.status() == WL_CONNECTED) {
+                // Force Cloudflare DNS — router DNS can be unreliable for github.com
+                WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
+                            IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
+            }
         }
 
         if (WiFi.status() != WL_CONNECTED) {
@@ -98,4 +103,5 @@ void ota_start(uint8_t target_version) {
     Serial.println("[OTA] All attempts failed — staying on current firmware.");
     WiFi.disconnect(true);
     espnow_init();
+    sendStatus(0, -1.0f, THERMAL_NORMAL, false, MSG_OTA_FAILED, OTA_MAX_ATTEMPTS);
 }

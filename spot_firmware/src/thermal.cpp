@@ -72,8 +72,9 @@ uint8_t applyThermalThrottle(uint8_t requested, float tempC) {
         return (uint8_t)allowed;
     }
 
-    // Below target but rising — apply D term only to slow the climb early
-    if (error <= 0.0f && dT > 0.0f) {
+    // Below target but rising — apply D term only within 10°C of target
+    // (avoids reacting to ADC noise at cold temperatures far from target)
+    if (error <= 0.0f && dT > 0.0f && error >= -10.0f) {
         float correction = THERMAL_PID_KI * _pid_integral + THERMAL_PID_KD * dT;
         float allowed = (float)requested - correction;
         if (allowed < PWM_MIN_FLOOR) allowed = PWM_MIN_FLOOR;

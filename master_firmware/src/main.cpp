@@ -398,6 +398,10 @@ static void master_ota_start(uint8_t target_version) {
         return;
     }
 
+    // Force Cloudflare DNS — router DNS can be unreliable for github.com
+    WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(),
+                IPAddress(1, 1, 1, 1), IPAddress(1, 0, 0, 1));
+
     Serial.printf("[OTA] Connected. Starting HTTP update...\n");
 
     char url[200];
@@ -485,19 +489,18 @@ static void uart2_poll() {
                 uint8_t target = _u2buf[2];
                 Serial.printf("[UART2] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
 
-                // Save required slave version to NVS
-                Preferences prefs;
-                prefs.begin("config", false);
-                prefs.putUChar("fw_version", target);
-                prefs.end();
-                _required_fw_version = target;
-
                 if (FW_VERSION < target) {
-                    // Self-update first — on reboot, bridge will resend VERSION frame
+                    // Self-update first — NVS written only on successful reboot.
+                    // on reboot, bridge will resend VERSION frame
                     // and master will then be up to date and broadcast WHOIS to spots.
                     master_ota_start(target);
                 } else {
-                    // Master already up to date — trigger spot updates via WHOIS.
+                    // Master already up to date — save version and trigger spot updates.
+                    Preferences prefs;
+                    prefs.begin("config", false);
+                    prefs.putUChar("fw_version", target);
+                    prefs.end();
+                    _required_fw_version = target;
                     // Spots reply HELLO → master checks their version → ACK or REJECT+OTA.
                     sendWhois();
                 }
@@ -593,16 +596,17 @@ static void processLine(char *line) {
         if (!ver_tok) { Serial.println("[ERR] Usage: version <N>"); return; }
         uint8_t target = (uint8_t)atoi(ver_tok);
         if (target == 0) { Serial.println("[ERR] Version must be >= 1"); return; }
-        // Save to NVS
-        Preferences prefs;
-        prefs.begin("config", false);
-        prefs.putUChar("fw_version", target);
-        prefs.end();
-        _required_fw_version = target;
         Serial.printf("[CMD] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
         if (FW_VERSION < target) {
+            // NVS written only on successful reboot — don't persist a failed target
             master_ota_start(target);
         } else {
+            // Master already up to date — save version and push to spots
+            Preferences prefs;
+            prefs.begin("config", false);
+            prefs.putUChar("fw_version", target);
+            prefs.end();
+            _required_fw_version = target;
             sendWhois();
         }
         return;
