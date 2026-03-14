@@ -63,7 +63,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define STATUS_LED_OFF_MS          2000   // NORMAL state: LED off duration
 
 // ─── Firmware Version & OTA ───────────────────────────────────────────────────
-#define FW_VERSION  7
+#define FW_VERSION  8
 #define OTA_MAX_ATTEMPTS  5
 #define OTA_RETRY_DELAY_MS  10000
 #define OTA_BASE_URL \
