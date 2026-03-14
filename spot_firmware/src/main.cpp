@@ -73,6 +73,7 @@ void loop() {
     // 3. Periodic status report to master every 10 seconds
     if (now - g_last_report_ms >= STATUS_REPORT_INTERVAL_MS) {
         g_last_report_ms = now;
+        espnow_retryHelloIfNeeded();
         sendStatus(getBrightness(), g_temperature, g_thermal_state, g_is_on);
     }
 

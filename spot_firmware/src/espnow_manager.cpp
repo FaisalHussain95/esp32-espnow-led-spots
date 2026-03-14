@@ -18,6 +18,9 @@ static uint8_t        _ota_target_version  = 0;
 #define SEND_FAIL_CUTOFF  5
 static volatile uint8_t _send_fail_count = 0;
 
+// HELLO ACK tracking — retry HELLO if master hasn't acknowledged
+static volatile bool _hello_acked = false;
+
 // ─── Receive callback (ISR context) ──────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
     if (len < (int)sizeof(espnow_header_t)) return;
@@ -26,6 +29,7 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
     memcpy(&hdr, data, sizeof(espnow_header_t));
 
     _send_fail_count = 0;  // Any received packet means master is reachable
+    _hello_acked = true;   // Master knows us if it's sending to us
 
     switch (hdr.msg_type) {
 
@@ -117,6 +121,7 @@ void espnow_init() {
     esp_now_add_peer(&bcast_peer);  // may already exist — OK
 
     // Send MSG_HELLO via broadcast so master always receives it
+    _hello_acked = false;
     uint8_t self_mac[6];
     WiFi.macAddress(self_mac);
 
@@ -181,4 +186,21 @@ bool espnow_getOtaTrigger(uint8_t *target_version) {
 
 bool espnow_masterUnreachable() {
     return _send_fail_count >= SEND_FAIL_CUTOFF;
+}
+
+void espnow_retryHelloIfNeeded() {
+    if (_hello_acked) return;
+
+    Serial.println("[ESPNOW] No ACK yet — resending HELLO (broadcast)");
+    uint8_t self_mac[6];
+    WiFi.macAddress(self_mac);
+
+    espnow_header_t hello = {};
+    hello.msg_type   = MSG_HELLO;
+    hello.fw_version = FW_VERSION;
+    hello.attempt    = SPOT_ID;
+    memcpy(hello.mac, self_mac, 6);
+
+    static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    esp_now_send(BCAST, (uint8_t *)&hello, sizeof(hello));
 }

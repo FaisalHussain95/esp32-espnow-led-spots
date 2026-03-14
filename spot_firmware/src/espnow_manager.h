@@ -23,3 +23,6 @@ bool espnow_getOtaTrigger(uint8_t *target_version);
 
 // Returns true if master is unreachable (5+ consecutive send failures).
 bool espnow_masterUnreachable();
+
+// Resend HELLO if master hasn't ACKed yet. Call periodically from loop().
+void espnow_retryHelloIfNeeded();
