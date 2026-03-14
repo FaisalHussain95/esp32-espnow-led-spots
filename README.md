@@ -349,36 +349,38 @@ version 2      → push OTA firmware v2 to all spots
 
 ## Provisioning (First-Time Setup)
 
-Credentials are set by editing `build_flags` in the relevant `platformio.ini` before the first flash.
+Credentials are injected into all three `platformio.ini` files by the `inject_credentials.js` script.
 On first boot they are written to NVS (flash, separate partition from firmware) and survive all subsequent OTA updates.
 
-### spot_firmware/platformio.ini
-```ini
-build_flags =
-    -DCONFIG_ESPNOW_PMK=\"aabbccddeeff00112233445566778899\"  ; 32 hex chars = 16 bytes
-    -DCONFIG_WIFI_SSID=\"YourSSID\"       ; used only for OTA HTTP downloads
-    -DCONFIG_WIFI_PASSWORD=\"YourPassword\"
+### 1. Copy and fill in `.env`
+
+```bash
+cp .env.exemple .env
 ```
 
-### master_firmware/platformio.ini
 ```ini
-build_flags =
-    -DBOARD_HAS_PSRAM=0
-    -DCONFIG_ESPNOW_PMK=\"aabbccddeeff00112233445566778899\"  ; must match all spots!
+# .env
+PMK_INPUT=your-secret-passphrase   # hashed to a 32-char hex PMK
+
+WIFI_SSID=YourNetwork              # used only for OTA HTTP downloads
+WIFI_PASSWORD=YourPassword
+
+MQTT_BROKER_IP=192.168.1.x         # WiFi bridge only — leave blank if unused
+MQTT_PORT=1883
+MQTT_USER=
+MQTT_PASSWORD=
 ```
 
-### wifi_bridge_firmware/platformio.ini
-```ini
-build_flags =
-    -DCONFIG_WIFI_SSID=\"YourSSID\"
-    -DCONFIG_WIFI_PASSWORD=\"YourPassword\"
-    -DCONFIG_MQTT_BROKER_IP=\"192.168.1.x\"
-    -DCONFIG_MQTT_PORT=1883
-    -DCONFIG_MQTT_USER=\"\"        ; leave empty if broker has no auth
-    -DCONFIG_MQTT_PASSWORD=\"\"
+### 2. Inject credentials into all platformio.ini files
+
+```bash
+node --env-file=.env inject_credentials.js
 ```
 
-Then flash:
+This updates `build_flags` in `spot_firmware/`, `master_firmware/`, and `wifi_bridge_firmware/` in one shot.
+
+### 3. Flash
+
 ```bash
 cd spot_firmware        && pio run --target upload
 cd master_firmware      && pio run --target upload
