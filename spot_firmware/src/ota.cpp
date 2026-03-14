@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_now.h>
 #include <Preferences.h>
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
@@ -27,6 +28,9 @@ void ota_start(uint8_t target_version) {
         return;
     }
 
+    // Free heap for TLS by stopping ESP-NOW before WiFi connect
+    esp_now_deinit();
+
     // Connect to WiFi
     Serial.printf("[OTA] Connecting to WiFi: %s", ssid.c_str());
     WiFi.begin(ssid.c_str(), password.c_str());
@@ -52,7 +56,8 @@ void ota_start(uint8_t target_version) {
         Serial.printf("[OTA] Attempt %d/%d...\n", attempt, OTA_MAX_ATTEMPTS);
 
         WiFiClientSecure client;
-        client.setInsecure();  // skip cert validation (GitHub CDN)
+        client.setInsecure();
+        client.setHandshakeTimeout(30);  // GitHub CDN can be slow; default 10s often times out
         httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
         t_httpUpdate_return result = httpUpdate.update(client, url);
 

@@ -381,29 +381,43 @@ static void master_ota_start(uint8_t target_version) {
     char url[200];
     snprintf(url, sizeof(url), MASTER_OTA_URL_FMT, target_version, target_version);
 
-    WiFiClientSecure client;
-    client.setInsecure();  // skip cert validation (GitHub CDN)
-
     httpUpdate.setLedPin(LED_BUILTIN, LOW);
     httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-    t_httpUpdate_return ret = httpUpdate.update(client, url);
 
-    switch (ret) {
-        case HTTP_UPDATE_FAILED:
-            Serial.printf("[OTA] Update failed: %s\n", httpUpdate.getLastErrorString().c_str());
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_STA);
-            break;
-        case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("[OTA] No update available");
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_STA);
-            break;
-        case HTTP_UPDATE_OK:
-            Serial.println("[OTA] Update OK — rebooting");
-            // httpUpdate triggers ESP.restart() automatically
-            break;
+    for (int attempt = 1; attempt <= 5; attempt++) {
+        Serial.printf("[OTA] Attempt %d/5\n", attempt);
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setHandshakeTimeout(30);  // GitHub CDN can be slow; default 10s often times out
+        t_httpUpdate_return ret = httpUpdate.update(client, url);
+
+        switch (ret) {
+            case HTTP_UPDATE_OK:
+                Serial.println("[OTA] Update OK — rebooting");
+                return;  // httpUpdate triggers ESP.restart() automatically
+            case HTTP_UPDATE_NO_UPDATES:
+                Serial.println("[OTA] No update available");
+                WiFi.disconnect(true);
+                WiFi.mode(WIFI_STA);
+                return;
+            case HTTP_UPDATE_FAILED:
+                Serial.printf("[OTA] Attempt %d failed: %s\n", attempt,
+                              httpUpdate.getLastErrorString().c_str());
+                if (attempt < 5) delay(10000);
+                break;
+        }
     }
+
+    // All attempts exhausted — rollback version so spots keep working
+    Serial.printf("[OTA] All attempts failed — rolling back required version from %d to %d\n",
+                  target_version, FW_VERSION);
+    _required_fw_version = FW_VERSION;
+    prefs.begin("config", false);
+    prefs.putUChar("fw_version", FW_VERSION);
+    prefs.end();
+
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_STA);
 }
 
 // ─── UART2 bridge (to WiFi ESP32-B) ──────────────────────────────────────────
