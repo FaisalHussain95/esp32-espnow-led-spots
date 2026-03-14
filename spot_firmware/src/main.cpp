@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include "config.h"
 #include "thermal.h"
 #include "dimming.h"
@@ -7,6 +8,7 @@
 #include "ota.h"
 
 // ─── Global state ─────────────────────────────────────────────────────────────
+uint8_t         SPOT_ID                = 0x01;  // Overwritten from NVS in setup()
 static uint8_t  g_requested_brightness = 255;  // Master's intended brightness
 static bool     g_is_on                = false;
 static float    g_temperature          = 0.0f;
@@ -22,13 +24,18 @@ static void updateStatusLED();
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial.printf("[BOOT] Spot node ID=0x%02X  FW_VERSION=%d\n", SPOT_ID, FW_VERSION);
+    delay(1500);  // Wait for USB CDC to reconnect after reset (C3 SuperMini)
+    WiFi.mode(WIFI_STA);
 
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, STATUS_LED_OFF);
 
-    // Write PMK + WiFi creds to NVS on first boot (reads from Kconfig/menuconfig)
+    // Write PMK + WiFi creds + spot ID to NVS on first boot
     provisioning_init();
+    SPOT_ID = provisioning_get_spot_id();
+
+    Serial.printf("[BOOT] Spot node ID=0x%02X  FW_VERSION=%d  MAC=%s\n",
+                  SPOT_ID, FW_VERSION, WiFi.macAddress().c_str());
 
     analogReadResolution(12);       // 12-bit → 0–4095
     analogRead(PIN_NTC_ADC);        // Dummy read to initialise the ADC channel
@@ -97,6 +104,7 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
         case CMD_TURN_OFF:
             g_is_on = false;
             fadeTo(0, 500);  // 500ms fade-out
+            thermalPID_reset();
             break;
 
         case CMD_REQUEST_STATUS:

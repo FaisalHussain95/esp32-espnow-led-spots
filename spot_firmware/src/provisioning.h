@@ -9,3 +9,7 @@ void provisioning_init();
 // Returns the 16-byte PMK loaded from NVS into the provided buffer.
 // Must be called after provisioning_init().
 void provisioning_get_pmk(uint8_t pmk_out[16]);
+
+// Returns the spot ID loaded from NVS (default: CONFIG_SPOT_ID build flag).
+// Must be called after provisioning_init().
+uint8_t provisioning_get_spot_id();

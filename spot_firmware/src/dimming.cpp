@@ -12,6 +12,7 @@ void dimming_init() {
 }
 
 void setBrightness(uint8_t value) {
+    if (value > PWM_MAX) value = PWM_MAX;
     _current_brightness = value;
     ledcWrite(LEDC_CHANNEL, value);
 }

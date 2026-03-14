@@ -34,9 +34,13 @@ static volatile bool    _ota_fail_available = false;
 
 static esp_now_status_t  _status_buffer;
 
+// Runtime MAC table: index 0 = spot 0x01, populated on HELLO
+static uint8_t g_spot_macs[NUM_SPOTS][6];
+
 typedef struct {
     uint8_t mac[6];
     uint8_t fw_version;
+    uint8_t spot_id;
 } hello_event_t;
 static hello_event_t _hello_buffer;
 
@@ -70,6 +74,7 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
         case MSG_HELLO: {
             memcpy((void *)_hello_buffer.mac, hdr->mac, 6);
             _hello_buffer.fw_version = hdr->fw_version;
+            _hello_buffer.spot_id    = hdr->attempt;  // spot_id carried in attempt field
             _hello_available = true;
             break;
         }
@@ -189,11 +194,24 @@ static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness) {
 
     if (spot_id == 0xFF) {
         esp_now_send(BROADCAST_MAC, (uint8_t *)&pkt, sizeof(pkt));
-    } else if (spot_id >= 0x01 && spot_id <= 0x0A) {
-        esp_now_send(SPOT_MACS[spot_id - 1], (uint8_t *)&pkt, sizeof(pkt));
+    } else if (spot_id >= 0x01 && spot_id <= NUM_SPOTS) {
+        const uint8_t *mac = g_spot_macs[spot_id - 1];
+        if (mac[0] == 0 && mac[1] == 0 && mac[2] == 0) {
+            Serial.printf("[ERR] Spot 0x%02X MAC not known yet — awaiting HELLO\n", spot_id);
+            return;
+        }
+        esp_now_send(mac, (uint8_t *)&pkt, sizeof(pkt));
     } else {
         Serial.printf("[ERR] Invalid spot ID: 0x%02X\n", spot_id);
     }
+}
+
+static void sendWhois() {
+    espnow_header_t pkt = {};
+    pkt.msg_type   = MSG_WHOIS;
+    pkt.fw_version = FW_VERSION;
+    esp_now_send(BROADCAST_MAC, (uint8_t *)&pkt, sizeof(pkt));
+    Serial.println("[BOOT] WHOIS broadcast — waiting for spots to re-announce");
 }
 
 static void sendOtaBroadcast(uint8_t target_version) {
@@ -224,18 +242,24 @@ static void sendReject(const uint8_t *mac, uint8_t target_version) {
 }
 
 // ─── HELLO handler (called from loop, not ISR) ────────────────────────────────
-static void handleHello(const uint8_t *mac, uint8_t spot_fw_version) {
+static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spot_id) {
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    Serial.printf("[HELLO] MAC=%s  fw=%d  required=%d\n",
-                  mac_str, spot_fw_version, _required_fw_version);
+    Serial.printf("[HELLO] spot=0x%02X  MAC=%s  fw=%d  required=%d\n",
+                  spot_id, mac_str, spot_fw_version, _required_fw_version);
 
     // Dynamically register peer with encryption if not already known
     if (!esp_now_is_peer_exist(mac)) {
         addPeer(mac);
         Serial.printf("[HELLO] New peer registered: %s\n", mac_str);
+    }
+
+    // Store spot_id → MAC mapping in RAM
+    if (spot_id >= 0x01 && spot_id <= NUM_SPOTS) {
+        memcpy(g_spot_macs[spot_id - 1], mac, 6);
+        g_spot_state[spot_id - 1].spot_id = spot_id;
     }
 
     if (spot_fw_version >= _required_fw_version) {
@@ -375,13 +399,13 @@ static void printHelp() {
     Serial.println("  status  <spot|all>         Request status reply");
     Serial.println("  version <N>                Set required fw version, broadcast OTA");
     Serial.println("  help                       This message");
-    Serial.println("  <spot>: 1-10  or  all");
+    Serial.println("  <spot>: 1-254  or  all");
 }
 
 static uint8_t parseSpotId(const char *tok) {
     if (strcasecmp(tok, "all") == 0) return 0xFF;
     int n = atoi(tok);
-    if (n >= 1 && n <= 10) return (uint8_t)n;
+    if (n >= 1 && n <= NUM_SPOTS) return (uint8_t)n;
     return 0x00;
 }
 
@@ -501,18 +525,13 @@ void setup() {
     // Broadcast peer (unencrypted — needed for OTA broadcast)
     addPeer(BROADCAST_MAC);
 
-    // Pre-register known spot peers (with encryption)
-    for (int i = 0; i < NUM_SPOTS; i++) {
-        bool is_broadcast = true;
-        for (int b = 0; b < 6; b++) {
-            if (SPOT_MACS[i][b] != 0xFF) { is_broadcast = false; break; }
-        }
-        if (!is_broadcast) addPeer(SPOT_MACS[i]);
-    }
+    // Spots register dynamically on HELLO — no pre-registration needed.
 
     memset(g_spot_state, 0, sizeof(g_spot_state));
+    memset(g_spot_macs,  0, sizeof(g_spot_macs));
 
     updateOLED();
+    sendWhois();
     Serial.println("[BOOT] Ready.  Type 'help' for commands.");
 }
 
@@ -525,10 +544,8 @@ void loop() {
     if (_hello_available) {
         _hello_available = false;
         uint8_t mac[6];
-        uint8_t fw_ver;
         memcpy(mac, (const void *)_hello_buffer.mac, 6);
-        fw_ver = _hello_buffer.fw_version;
-        handleHello(mac, fw_ver);
+        handleHello(mac, _hello_buffer.fw_version, _hello_buffer.spot_id);
     }
 
     // 2. Process received status packets
@@ -537,7 +554,7 @@ void loop() {
         esp_now_status_t s;
         memcpy(&s, (const void *)&_status_buffer, sizeof(s));
 
-        if (s.spot_id >= 0x01 && s.spot_id <= 0x0A) {
+        if (s.spot_id >= 0x01 && s.spot_id <= NUM_SPOTS) {
             const esp_now_status_t &prev = g_spot_state[s.spot_id - 1];
 
             // Boot packet: brightness=0, is_on=false, temp=0 — spot just rebooted.

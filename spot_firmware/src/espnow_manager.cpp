@@ -26,6 +26,39 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
             Serial.println("[ESPNOW] ACK — version OK");
             break;
 
+        case MSG_WHOIS: {
+            // Master rebooted and is re-discovering spots — re-send our HELLO
+            uint8_t self_mac[6];
+            WiFi.macAddress(self_mac);
+            espnow_header_t hello = {};
+            hello.msg_type   = MSG_HELLO;
+            hello.fw_version = FW_VERSION;
+            hello.attempt    = SPOT_ID;
+            memcpy(hello.mac, self_mac, 6);
+            // Send unencrypted — master may not have us registered yet
+            esp_now_peer_info_t tmp_peer = {};
+            memcpy(tmp_peer.peer_addr, MASTER_MAC, 6);
+            tmp_peer.channel = 0;
+            tmp_peer.encrypt = false;
+            tmp_peer.ifidx   = WIFI_IF_STA;
+            esp_now_del_peer(MASTER_MAC);
+            esp_now_add_peer(&tmp_peer);
+            esp_now_send(MASTER_MAC, (uint8_t *)&hello, sizeof(hello));
+            Serial.println("[ESPNOW] WHOIS → re-sent HELLO");
+            // Re-register master encrypted
+            uint8_t pmk[16];
+            provisioning_get_pmk(pmk);
+            esp_now_del_peer(MASTER_MAC);
+            memset(&tmp_peer, 0, sizeof(tmp_peer));
+            memcpy(tmp_peer.peer_addr, MASTER_MAC, 6);
+            tmp_peer.channel = 0;
+            tmp_peer.encrypt = true;
+            memcpy(tmp_peer.lmk, pmk, 16);
+            tmp_peer.ifidx   = WIFI_IF_STA;
+            esp_now_add_peer(&tmp_peer);
+            break;
+        }
+
         case MSG_REJECT:
         case MSG_OTA_NOW:
             if (len >= (int)sizeof(espnow_ota_packet_t)) {
@@ -79,30 +112,42 @@ void espnow_init() {
     esp_now_register_recv_cb(onDataReceive);
     esp_now_register_send_cb(onDataSent);
 
-    // Register master peer with encryption (PMK used as LMK — single shared key)
+    // Register master peer unencrypted first — HELLO must be receivable by master
+    // before it knows our MAC and can set up an encrypted session.
     esp_now_peer_info_t peer = {};
     memcpy(peer.peer_addr, MASTER_MAC, 6);
     peer.channel = 0;
-    peer.encrypt = true;
-    memcpy(peer.lmk, pmk, 16);
+    peer.encrypt = false;
     peer.ifidx   = WIFI_IF_STA;
 
     if (esp_now_add_peer(&peer) != ESP_OK) {
         Serial.println("[ERROR] Failed to add master peer");
     }
 
-    // Send MSG_HELLO (master registers us dynamically and checks version)
+    // Send MSG_HELLO unencrypted so master can register us dynamically
     uint8_t self_mac[6];
     WiFi.macAddress(self_mac);
 
     espnow_header_t hello = {};
     hello.msg_type   = MSG_HELLO;
     hello.fw_version = FW_VERSION;
-    hello.attempt    = 0;
+    hello.attempt    = SPOT_ID;  // Reuse attempt field to carry spot_id in HELLO
     memcpy(hello.mac, self_mac, 6);
 
     esp_now_send(MASTER_MAC, (uint8_t *)&hello, sizeof(hello));
-    Serial.printf("[ESPNOW] HELLO sent — FW_VERSION=%d\n", FW_VERSION);
+    Serial.printf("[ESPNOW] HELLO sent — FW_VERSION=%d SPOT_ID=0x%02X\n", FW_VERSION, SPOT_ID);
+
+    // Re-register master peer with encryption for all subsequent packets
+    esp_now_del_peer(MASTER_MAC);
+    memset(&peer, 0, sizeof(peer));
+    memcpy(peer.peer_addr, MASTER_MAC, 6);
+    peer.channel = 0;
+    peer.encrypt = true;
+    memcpy(peer.lmk, pmk, 16);
+    peer.ifidx   = WIFI_IF_STA;
+    if (esp_now_add_peer(&peer) != ESP_OK) {
+        Serial.println("[ERROR] Failed to re-add master peer (encrypted)");
+    }
 }
 
 void sendStatus(uint8_t brightness, float temperature,

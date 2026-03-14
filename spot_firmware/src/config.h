@@ -2,10 +2,12 @@
 #include <stdint.h>
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
-// Change SPOT_ID (0x01–0x0A) and MASTER_MAC for each unit before flashing.
-#define SPOT_ID  0x01
+// SPOT_ID is set via CONFIG_SPOT_ID build flag in platformio.ini,
+// written to NVS on first flash, and survives OTA updates.
+// Use provisioning_get_spot_id() at runtime — do not use CONFIG_SPOT_ID directly.
+extern uint8_t SPOT_ID;
 
-// Placeholder: replace with actual master MAC (run WiFi.macAddress() on master)
+// Master MAC — the spot sends status/hello to this address.
 static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 
 // ─── GPIO Pin Assignments ─────────────────────────────────────────────────────
@@ -36,14 +38,22 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define ADC_MAX_VALUE   4095.0f    // 12-bit ADC full scale
 
 // ─── Thermal Thresholds (°C) ──────────────────────────────────────────────────
-#define TEMP_NORMAL_MAX   60.0f    // Below this: full PWM authority
-#define TEMP_THROTTLE_MAX 75.0f    // 60–75°C: linear brightness reduction
-#define TEMP_FLOOR_MAX    85.0f    // 75–85°C: hold at PWM_MIN_FLOOR
+#define TEMP_PID_TARGET   58.0f    // PI controller holds heatsink at this temp
+#define TEMP_NORMAL_MAX   60.0f    // Below this: PI inactive, full PWM authority
+#define TEMP_THROTTLE_MAX 75.0f    // Above this: hard floor enforced
 #define TEMP_CRITICAL     85.0f    // Above this: CRITICAL — alert master
+
+// ─── Thermal PID Tuning ───────────────────────────────────────────────────────
+// Kp: PWM units reduced per °C above target (increase for faster response)
+// Ki: PWM units reduced per °C·s accumulated (increase to eliminate steady offset)
+// Kd: PWM units reduced per °C/s of rising temp (pre-acts before hitting target)
+#define THERMAL_PID_KP    8.0f
+#define THERMAL_PID_KI    0.5f
+#define THERMAL_PID_KD    5.0f
 
 // ─── Dimming Limits ───────────────────────────────────────────────────────────
 #define PWM_MIN_FLOOR   20         // Minimum PWM in throttle/critical states
-#define PWM_MAX        255
+#define PWM_MAX        100         // Hardware limit: >100 overdrives heatsink (54°C @ 100)
 
 // ─── Timing (ms) ──────────────────────────────────────────────────────────────
 #define THERMAL_CHECK_INTERVAL_MS  1000
@@ -65,6 +75,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define MSG_REJECT      0x03  // master → slave: version outdated, OTA incoming
 #define MSG_OTA_NOW     0x04  // master → all slaves: trigger OTA to target_version
 #define MSG_OTA_FAILED  0x05  // slave → master: OTA attempt failed
+#define MSG_WHOIS       0x06  // master → all slaves: re-announce yourself (broadcast on master boot)
 #define MSG_CMD         0x10  // master → slave: LED command (wraps esp_now_cmd_t)
 #define MSG_STATUS      0x11  // slave → master: status reply (wraps esp_now_status_t)
 

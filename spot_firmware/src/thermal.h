@@ -9,6 +9,8 @@ float readTemperatureC();
 // Returns THERMAL_NORMAL, THERMAL_THROTTLE, or THERMAL_CRITICAL.
 uint8_t getThermalState(float tempC);
 
-// Returns the thermally-allowed PWM value for a given requested brightness.
-// Call every thermal check cycle and re-apply the result to setBrightness().
+// PI controller: returns the thermally-allowed PWM cap for a given requested brightness.
+// Call every thermal check cycle (1s). Below TEMP_PID_TARGET the PI is inactive.
+// Call thermalPID_reset() when the light is turned off to clear the integrator.
 uint8_t applyThermalThrottle(uint8_t requested, float tempC);
+void    thermalPID_reset();

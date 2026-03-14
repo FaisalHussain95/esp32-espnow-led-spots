@@ -37,27 +37,69 @@ uint8_t getThermalState(float tempC) {
     return THERMAL_NORMAL;
 }
 
+// ─── PID controller state ─────────────────────────────────────────────────────
+static float _pid_integral  = 0.0f;
+static float _prev_temp     = 0.0f;
+static bool  _prev_temp_valid = false;
+
+void thermalPID_reset() {
+    _pid_integral    = 0.0f;
+    _prev_temp_valid = false;
+}
+
 uint8_t applyThermalThrottle(uint8_t requested, float tempC) {
-    if (tempC < TEMP_NORMAL_MAX) {
-        // NORMAL: full authority
-        return requested;
+    // Hard limits take priority
+    if (tempC >= TEMP_CRITICAL)     return PWM_MIN_FLOOR;
+    if (tempC >= TEMP_THROTTLE_MAX) return PWM_MIN_FLOOR;
+
+    // Rate of change (°C/s) — positive means rising
+    float dT = 0.0f;
+    if (_prev_temp_valid) {
+        dT = tempC - _prev_temp;  // dt = 1s implicit
+    }
+    _prev_temp       = tempC;
+    _prev_temp_valid = true;
+
+    float error = tempC - TEMP_PID_TARGET;  // positive = too hot
+
+    // Below target and cooling or stable — let integral decay slowly
+    if (error <= 0.0f && dT <= 0.0f) {
+        _pid_integral *= 0.98f;
+        float correction = THERMAL_PID_KI * _pid_integral;
+        float allowed = (float)requested - correction;
+        if (allowed < PWM_MIN_FLOOR) allowed = PWM_MIN_FLOOR;
+        if (allowed > (float)requested) allowed = (float)requested;
+        return (uint8_t)allowed;
     }
 
-    if (tempC >= TEMP_CRITICAL) {
-        // CRITICAL: hard floor
-        return PWM_MIN_FLOOR;
+    // Below target but rising — apply D term only to slow the climb early
+    if (error <= 0.0f && dT > 0.0f) {
+        float correction = THERMAL_PID_KI * _pid_integral + THERMAL_PID_KD * dT;
+        float allowed = (float)requested - correction;
+        if (allowed < PWM_MIN_FLOOR) allowed = PWM_MIN_FLOOR;
+        if (allowed > (float)requested) allowed = (float)requested;
+        Serial.printf("[PID] pre-act dT=%.2f  I=%.1f  corr=%.0f  pwm=%.0f\n",
+                      dT, _pid_integral, correction, allowed);
+        return (uint8_t)allowed;
     }
 
-    if (tempC >= TEMP_THROTTLE_MAX) {
-        // 75–85°C: floor enforced
-        return (requested < PWM_MIN_FLOOR) ? requested : PWM_MIN_FLOOR;
+    // Above target — full PID
+    float correction = THERMAL_PID_KP * error
+                     + THERMAL_PID_KI * _pid_integral
+                     + THERMAL_PID_KD * dT;
+
+    float allowed = (float)requested - correction;
+    if (allowed < PWM_MIN_FLOOR) allowed = PWM_MIN_FLOOR;
+    if (allowed > (float)requested) allowed = (float)requested;
+
+    // Anti-windup: only integrate when not saturated
+    bool saturated = (allowed <= PWM_MIN_FLOOR) || (allowed >= (float)requested);
+    if (!saturated) {
+        _pid_integral += error;
     }
 
-    // 60–75°C: linear reduction
-    // scale: 1.0 at 60°C → 0.0 at 75°C
-    // allowed: PWM_MIN_FLOOR + scale * (requested - PWM_MIN_FLOOR)
-    float scale = 1.0f - ((tempC - TEMP_NORMAL_MAX) / (TEMP_THROTTLE_MAX - TEMP_NORMAL_MAX));
-    float allowed = PWM_MIN_FLOOR + scale * ((float)requested - PWM_MIN_FLOOR);
-    uint8_t result = (uint8_t)allowed;
-    return (result < PWM_MIN_FLOOR) ? PWM_MIN_FLOOR : result;
+    Serial.printf("[PID] err=%.1f  dT=%.2f  I=%.1f  corr=%.0f  pwm=%.0f\n",
+                  error, dT, _pid_integral, correction, allowed);
+
+    return (uint8_t)allowed;
 }

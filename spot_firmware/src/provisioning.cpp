@@ -2,7 +2,8 @@
 #include <Preferences.h>
 #include "provisioning.h"
 
-static uint8_t _pmk[16] = {};
+static uint8_t _pmk[16]   = {};
+static uint8_t _spot_id   = 0;
 
 // Convert 32-char lowercase hex string to 16-byte array.
 static bool hex_to_bytes(const char *hex, uint8_t *out, size_t out_len) {
@@ -34,6 +35,7 @@ void provisioning_init() {
     Serial.println("[PROV] FORCE RESET — clearing NVS credentials.");
     prefs.begin("espnow", false); prefs.clear(); prefs.end();
     prefs.begin("wifi",   false); prefs.clear(); prefs.end();
+    prefs.begin("spot",   false); prefs.clear(); prefs.end();
 #endif
 
     // ── ESP-NOW PMK ────────────────────────────────────────────────────────────
@@ -53,6 +55,18 @@ void provisioning_init() {
     }
     prefs.end();
 
+    // ── Spot ID ────────────────────────────────────────────────────────────────
+    prefs.begin("spot", false);
+    if (prefs.isKey("spot_id")) {
+        _spot_id = prefs.getUChar("spot_id", CONFIG_SPOT_ID);
+        Serial.printf("[PROV] Spot ID loaded from NVS: 0x%02X\n", _spot_id);
+    } else {
+        _spot_id = CONFIG_SPOT_ID;
+        prefs.putUChar("spot_id", _spot_id);
+        Serial.printf("[PROV] Spot ID written to NVS from build_flags: 0x%02X\n", _spot_id);
+    }
+    prefs.end();
+
     // ── WiFi credentials (for OTA HTTP) ───────────────────────────────────────
     prefs.begin("wifi", false);
     if (!prefs.isKey("ssid")) {
@@ -67,4 +81,8 @@ void provisioning_init() {
 
 void provisioning_get_pmk(uint8_t pmk_out[16]) {
     memcpy(pmk_out, _pmk, 16);
+}
+
+uint8_t provisioning_get_spot_id() {
+    return _spot_id;
 }
