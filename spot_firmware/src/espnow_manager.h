@@ -20,3 +20,6 @@ bool espnow_getCommand(esp_now_cmd_t *cmd);
 
 // Returns true if an OTA trigger arrived. Fills target_version.
 bool espnow_getOtaTrigger(uint8_t *target_version);
+
+// Returns true if master is unreachable (5+ consecutive send failures).
+bool espnow_masterUnreachable();

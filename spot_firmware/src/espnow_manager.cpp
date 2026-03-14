@@ -13,12 +13,18 @@ static esp_now_cmd_t  _cmd_buffer;
 static volatile bool  _ota_available       = false;
 static uint8_t        _ota_target_version  = 0;
 
+// Consecutive send failure counter — spot cuts LED if master is unreachable
+#define SEND_FAIL_CUTOFF  5
+static volatile uint8_t _send_fail_count = 0;
+
 // ─── Receive callback (ISR context) ──────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
     if (len < (int)sizeof(espnow_header_t)) return;
 
     espnow_header_t hdr;
     memcpy(&hdr, data, sizeof(espnow_header_t));
+
+    _send_fail_count = 0;  // Any received packet means master is reachable
 
     switch (hdr.msg_type) {
 
@@ -69,12 +75,11 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
 
 // ─── Send callback ────────────────────────────────────────────────────────────
 static void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-    if (status != ESP_NOW_SEND_SUCCESS) {
-        uint8_t pmk[16];
-        provisioning_get_pmk(pmk);
-        Serial.print("[ESPNOW] Send failed  PMK: ");
-        for (int i = 0; i < 16; i++) Serial.printf("%02X", pmk[i]);
-        Serial.println();
+    if (status == ESP_NOW_SEND_SUCCESS) {
+        _send_fail_count = 0;
+    } else {
+        if (_send_fail_count < 255) _send_fail_count++;
+        Serial.printf("[ESPNOW] Send failed (%d/%d)\n", _send_fail_count, SEND_FAIL_CUTOFF);
     }
 }
 
@@ -166,4 +171,8 @@ bool espnow_getOtaTrigger(uint8_t *target_version) {
     *target_version = _ota_target_version;
     _ota_available  = false;
     return true;
+}
+
+bool espnow_masterUnreachable() {
+    return _send_fail_count >= SEND_FAIL_CUTOFF;
 }

@@ -13,8 +13,8 @@
 // ─── PMK (loaded from NVS on boot) ────────────────────────────────────────────
 static uint8_t _pmk[16] = {};
 
-// Required slave firmware version (loaded from NVS namespace "config", key "fw_version")
-static uint8_t _required_fw_version = FW_VERSION;
+// Required slave firmware version — always matches compiled FW_VERSION
+static const uint8_t _required_fw_version = FW_VERSION;
 
 // ─── OLED ─────────────────────────────────────────────────────────────────────
 // TTGO LoRa32 V1.0/V1.2: SSD1306 128×64, I2C on SDA=4, SCL=15, RST=16
@@ -120,7 +120,6 @@ static void provisioning_init() {
     // then remove the flag and reflash to return to normal NVS-first behaviour.
     Serial.println("[PROV] FORCE RESET — clearing NVS credentials.");
     prefs.begin("espnow", false); prefs.clear(); prefs.end();
-    prefs.begin("config", false); prefs.clear(); prefs.end();
 #endif
 
     prefs.begin("espnow", false);
@@ -162,11 +161,6 @@ static void provisioning_init() {
     } else {
         Serial.println("[PROV] WiFi credentials loaded from NVS.");
     }
-    prefs.end();
-
-    // Load required fw_version from NVS (default = FW_VERSION)
-    prefs.begin("config", false);
-    _required_fw_version = prefs.getUChar("fw_version", FW_VERSION);
     prefs.end();
 
     Serial.printf("[PROV] Required slave fw_version: %d\n", _required_fw_version);
@@ -437,14 +431,7 @@ static void master_ota_start(uint8_t target_version) {
         }
     }
 
-    // All attempts exhausted — rollback version so spots keep working
-    Serial.printf("[OTA] All attempts failed — rolling back required version from %d to %d\n",
-                  target_version, FW_VERSION);
-    _required_fw_version = FW_VERSION;
-    prefs.begin("config", false);
-    prefs.putUChar("fw_version", FW_VERSION);
-    prefs.end();
-
+    Serial.println("[OTA] All attempts failed — staying on current firmware.");
     espnow_reinit();
 }
 
@@ -499,20 +486,9 @@ static void uart2_poll() {
             if (_u2buf[3] == UART2_END) {
                 uint8_t target = _u2buf[2];
                 Serial.printf("[UART2] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
-
                 if (FW_VERSION < target) {
-                    // Self-update first — NVS written only on successful reboot.
-                    // on reboot, bridge will resend VERSION frame
-                    // and master will then be up to date and broadcast WHOIS to spots.
                     master_ota_start(target);
                 } else {
-                    // Master already up to date — save version and trigger spot updates.
-                    Preferences prefs;
-                    prefs.begin("config", false);
-                    prefs.putUChar("fw_version", target);
-                    prefs.end();
-                    _required_fw_version = target;
-                    // Spots reply HELLO → master checks their version → ACK or REJECT+OTA.
                     sendWhois();
                 }
             }
@@ -609,15 +585,8 @@ static void processLine(char *line) {
         if (target == 0) { Serial.println("[ERR] Version must be >= 1"); return; }
         Serial.printf("[CMD] VERSION target=%d (master FW=%d)\n", target, FW_VERSION);
         if (FW_VERSION < target) {
-            // NVS written only on successful reboot — don't persist a failed target
             master_ota_start(target);
         } else {
-            // Master already up to date — save version and push to spots
-            Preferences prefs;
-            prefs.begin("config", false);
-            prefs.putUChar("fw_version", target);
-            prefs.end();
-            _required_fw_version = target;
             sendWhois();
         }
         return;

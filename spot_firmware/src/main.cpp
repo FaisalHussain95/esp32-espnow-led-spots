@@ -76,7 +76,15 @@ void loop() {
         sendStatus(getBrightness(), g_temperature, g_thermal_state, g_is_on);
     }
 
-    // 4. Status LED heartbeat (non-uniform timing handled inside)
+    // 4. Safety: if master is unreachable, turn off LED
+    if (espnow_masterUnreachable() && g_is_on) {
+        Serial.println("[SAFE] Master unreachable — turning off LED");
+        g_is_on = false;
+        fadeTo(0, 500);
+        thermalPID_reset();
+    }
+
+    // 5. Status LED heartbeat (non-uniform timing handled inside)
     updateStatusLED();
 }
 
