@@ -25,40 +25,49 @@ void ota_start(uint8_t target_version) {
 
     if (ssid.isEmpty()) {
         Serial.println("[OTA] ERROR: No WiFi credentials in NVS. Re-provision.");
+        espnow_init();
         return;
     }
-
-    // Free heap for TLS by stopping ESP-NOW before WiFi connect
-    esp_now_deinit();
-
-    // Connect to WiFi
-    Serial.printf("[OTA] Connecting to WiFi: %s", ssid.c_str());
-    WiFi.begin(ssid.c_str(), password.c_str());
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
-        delay(500);
-        Serial.print(".");
-    }
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("\n[OTA] WiFi connect failed.");
-        notify_master_ota_failed(0);
-        return;
-    }
-    Serial.printf("\n[OTA] WiFi OK. IP: %s\n", WiFi.localIP().toString().c_str());
 
     // Build URL
     char url[192];
     snprintf(url, sizeof(url), OTA_BASE_URL, target_version, target_version);
     Serial.printf("[OTA] URL: %s\n", url);
 
-    // Attempt OTA with retry
+    // Free heap for TLS by stopping ESP-NOW before WiFi
+    esp_now_deinit();
+    httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+
     for (uint8_t attempt = 1; attempt <= OTA_MAX_ATTEMPTS; attempt++) {
         Serial.printf("[OTA] Attempt %d/%d...\n", attempt, OTA_MAX_ATTEMPTS);
 
+        // Connect (or reconnect) to WiFi each attempt
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.printf("[OTA] Connecting to WiFi: %s", ssid.c_str());
+            WiFi.begin(ssid.c_str(), password.c_str());
+            uint32_t t0 = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
+                delay(500);
+                Serial.print(".");
+            }
+            Serial.println();
+        }
+
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.printf("[OTA] WiFi connect failed — SSID='%s' password='%s'\n",
+                          ssid.c_str(), password.c_str());
+            notify_master_ota_failed(attempt);
+            if (attempt < OTA_MAX_ATTEMPTS) {
+                Serial.printf("[OTA] Retrying in %ds...\n", OTA_RETRY_DELAY_MS / 1000);
+                delay(OTA_RETRY_DELAY_MS);
+            }
+            continue;
+        }
+        Serial.printf("[OTA] WiFi OK. IP: %s\n", WiFi.localIP().toString().c_str());
+
         WiFiClientSecure client;
         client.setInsecure();
-        client.setHandshakeTimeout(30);  // GitHub CDN can be slow; default 10s often times out
-        httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+        client.setHandshakeTimeout(30);
         t_httpUpdate_return result = httpUpdate.update(client, url);
 
         switch (result) {
@@ -75,10 +84,11 @@ void ota_start(uint8_t target_version) {
             case HTTP_UPDATE_NO_UPDATES:
                 Serial.println("[OTA] Server says no update available.");
                 notify_master_ota_failed(attempt);
-                return;  // No point retrying
+                WiFi.disconnect(true);
+                espnow_init();
+                return;
 
             case HTTP_UPDATE_OK:
-                // httpUpdate automatically restarts the device after flashing
                 Serial.println("[OTA] Success — restarting.");
                 ESP.restart();
                 return;
@@ -87,4 +97,5 @@ void ota_start(uint8_t target_version) {
 
     Serial.println("[OTA] All attempts failed — staying on current firmware.");
     WiFi.disconnect(true);
+    espnow_init();
 }

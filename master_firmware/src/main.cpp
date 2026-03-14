@@ -341,6 +341,27 @@ static void updateOLED() {
 #define MASTER_OTA_URL_FMT \
     "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/master_ttgo_v%d.bin"
 
+static void espnow_reinit() {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_STA);
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("[ERR] ESP-NOW re-init failed after OTA");
+        return;
+    }
+    esp_now_set_pmk(_pmk);
+    esp_now_register_recv_cb(onDataReceive);
+    esp_now_register_send_cb(onDataSent);
+    addPeer(BROADCAST_MAC);
+    // Re-register any known spot peers
+    for (int i = 0; i < NUM_SPOTS; i++) {
+        if (g_spot_macs[i][0] || g_spot_macs[i][1] || g_spot_macs[i][2]) {
+            addPeer(g_spot_macs[i]);
+        }
+    }
+    Serial.println("[ESPNOW] Re-initialised after OTA attempt");
+    sendWhois();
+}
+
 static void master_ota_start(uint8_t target_version) {
     Serial.printf("[OTA] Master self-update to v%d\n", target_version);
 
@@ -353,6 +374,7 @@ static void master_ota_start(uint8_t target_version) {
 
     if (ssid.isEmpty()) {
         Serial.println("[OTA] No WiFi credentials in NVS — cannot self-update");
+        espnow_reinit();
         return;
     }
 
@@ -370,9 +392,9 @@ static void master_ota_start(uint8_t target_version) {
     Serial.println();
 
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[OTA] WiFi connect failed — aborting self-update");
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_STA);
+        Serial.printf("[OTA] WiFi connect failed — SSID='%s' password='%s'\n",
+                      ssid.c_str(), password.c_str());
+        espnow_reinit();
         return;
     }
 
@@ -397,8 +419,7 @@ static void master_ota_start(uint8_t target_version) {
                 return;  // httpUpdate triggers ESP.restart() automatically
             case HTTP_UPDATE_NO_UPDATES:
                 Serial.println("[OTA] No update available");
-                WiFi.disconnect(true);
-                WiFi.mode(WIFI_STA);
+                espnow_reinit();
                 return;
             case HTTP_UPDATE_FAILED:
                 Serial.printf("[OTA] Attempt %d failed: %s\n", attempt,
@@ -416,8 +437,7 @@ static void master_ota_start(uint8_t target_version) {
     prefs.putUChar("fw_version", FW_VERSION);
     prefs.end();
 
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_STA);
+    espnow_reinit();
 }
 
 // ─── UART2 bridge (to WiFi ESP32-B) ──────────────────────────────────────────
