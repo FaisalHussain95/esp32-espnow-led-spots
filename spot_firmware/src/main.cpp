@@ -16,6 +16,13 @@ static uint8_t  g_thermal_state        = THERMAL_NORMAL;
 static uint32_t g_last_thermal_ms      = 0;
 static uint32_t g_last_report_ms       = 0;
 
+// Pulse loop state
+static bool     g_pulsing              = false;
+static uint8_t  g_pulse_peak           = 100;
+static uint16_t g_pulse_half_dur       = 250;  // half-cycle ms
+static bool     g_pulse_rising         = true;
+static uint32_t g_pulse_phase_start    = 0;
+
 // ─── Forward declarations ─────────────────────────────────────────────────────
 static void handleCommand(const esp_now_cmd_t &cmd);
 static void runThermalPolicy();
@@ -64,6 +71,26 @@ void loop() {
         ota_start(ota_version);  // Blocks until done or all retries fail
     }
 
+    // 1c. Pulse loop — non-blocking linear ramp up/down
+    if (g_pulsing) {
+        uint32_t elapsed = now - g_pulse_phase_start;
+        if (elapsed >= g_pulse_half_dur) {
+            // Phase done — flip direction
+            g_pulse_rising = !g_pulse_rising;
+            g_pulse_phase_start = now;
+            elapsed = 0;
+        }
+        uint8_t lo = PWM_MIN_FLOOR;
+        uint8_t hi = g_pulse_peak;
+        uint8_t val;
+        if (g_pulse_rising) {
+            val = lo + (uint8_t)((uint32_t)(hi - lo) * elapsed / g_pulse_half_dur);
+        } else {
+            val = hi - (uint8_t)((uint32_t)(hi - lo) * elapsed / g_pulse_half_dur);
+        }
+        setBrightness(val);
+    }
+
     // 2. Thermal check every 1 second
     if (now - g_last_thermal_ms >= THERMAL_CHECK_INTERVAL_MS) {
         g_last_thermal_ms = now;
@@ -94,6 +121,7 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
     switch (cmd.command) {
 
         case CMD_SET_BRIGHTNESS:
+            g_pulsing = false;
             g_requested_brightness = cmd.brightness;
             if (g_is_on) {
                 uint8_t allowed = applyThermalThrottle(g_requested_brightness, g_temperature);
@@ -102,6 +130,7 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
             break;
 
         case CMD_TURN_ON:
+            g_pulsing = false;
             g_is_on = true;
             if (cmd.brightness > 0) g_requested_brightness = cmd.brightness;
             {
@@ -111,20 +140,22 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
             break;
 
         case CMD_TURN_OFF:
+            g_pulsing = false;
             g_is_on = false;
             fadeTo(0, 500);  // 500ms fade-out
             thermalPID_reset();
             break;
 
         case CMD_PULSE: {
-            // Pulse from PWM_MIN_FLOOR to requested brightness and back
-            uint8_t peak = cmd.brightness > 0 ? cmd.brightness : 100;
-            uint16_t dur = cmd.param > 0 ? cmd.param : 500;
-            uint8_t prev = getBrightness();
-            bool was_on = g_is_on;
-            fadeTo(peak, dur / 2);
-            fadeTo(was_on ? prev : 0, dur / 2);
-            if (!was_on) g_is_on = false;
+            // Start looping pulse — runs in main loop, any other cmd stops it
+            g_pulse_peak     = cmd.brightness > 0 ? cmd.brightness : 100;
+            uint16_t dur     = cmd.param > 0 ? cmd.param : 500;
+            g_pulse_half_dur = dur / 2;
+            g_pulsing        = true;
+            g_pulse_rising   = true;
+            g_pulse_phase_start = millis();
+            g_is_on          = true;
+            setBrightness(PWM_MIN_FLOOR);
             break;
         }
 

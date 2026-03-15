@@ -15,7 +15,7 @@
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  19   // Master firmware version (for reference)
+#define FW_VERSION  20   // Master firmware version (for reference)
 
 // ─── ESP-NOW Message Types ────────────────────────────────────────────────────
 // Must match spot_firmware/src/config.h exactly.
