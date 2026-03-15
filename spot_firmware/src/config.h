@@ -63,7 +63,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define STATUS_LED_OFF_MS          2000   // NORMAL state: LED off duration
 
 // ─── Firmware Version & OTA ───────────────────────────────────────────────────
-#define FW_VERSION  18
+#define FW_VERSION  19
 #define OTA_MAX_ATTEMPTS  5
 #define OTA_RETRY_DELAY_MS  10000
 #define OTA_BASE_URL \
@@ -84,6 +84,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define CMD_TURN_ON         0x02
 #define CMD_TURN_OFF        0x03
 #define CMD_REQUEST_STATUS  0x04
+#define CMD_PULSE           0x05
 
 // ─── Thermal States ───────────────────────────────────────────────────────────
 #define THERMAL_NORMAL    0
@@ -103,9 +104,10 @@ typedef struct __attribute__((packed)) {
 
 // Master → Slave LED command payload (inside MSG_CMD)
 typedef struct __attribute__((packed)) {
-    uint8_t spot_id;     // 0xFF = broadcast
-    uint8_t brightness;  // 0–255
-    uint8_t command;     // CMD_* values above
+    uint8_t  spot_id;     // 0xFF = broadcast
+    uint8_t  brightness;  // 0–255
+    uint8_t  command;     // CMD_* values above
+    uint16_t param;       // CMD_PULSE: duration in ms (0 = default 500ms)
 } esp_now_cmd_t;
 
 // Slave → Master status payload (inside MSG_STATUS)

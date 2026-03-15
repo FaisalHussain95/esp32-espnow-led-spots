@@ -93,7 +93,7 @@ void espnow_init() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-    esp_wifi_set_max_tx_power(40);  // 10dBm — reduce TX current spikes for standalone 3.3V
+    esp_wifi_set_max_tx_power(52);  // 13dBm — balance TX range vs 3.3V current spikes
     int8_t tx_power = 0;
     esp_wifi_get_max_tx_power(&tx_power);
     Serial.printf("[ESPNOW] WiFi channel: %d  TX power: %d (0.25dBm units)\n", WiFi.channel(), tx_power);

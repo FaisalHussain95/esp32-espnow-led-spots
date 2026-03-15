@@ -15,7 +15,7 @@
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  18   // Master firmware version (for reference)
+#define FW_VERSION  19   // Master firmware version (for reference)
 
 // ─── ESP-NOW Message Types ────────────────────────────────────────────────────
 // Must match spot_firmware/src/config.h exactly.
@@ -33,6 +33,7 @@ static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define CMD_TURN_ON         0x02
 #define CMD_TURN_OFF        0x03
 #define CMD_REQUEST_STATUS  0x04
+#define CMD_PULSE           0x05
 
 // ─── Thermal States (for display) ────────────────────────────────────────────
 #define THERMAL_NORMAL    0
@@ -50,9 +51,10 @@ typedef struct __attribute__((packed)) {
 } espnow_header_t;
 
 typedef struct __attribute__((packed)) {
-    uint8_t spot_id;
-    uint8_t brightness;
-    uint8_t command;
+    uint8_t  spot_id;
+    uint8_t  brightness;
+    uint8_t  command;
+    uint16_t param;       // CMD_PULSE: duration in ms (0 = default 500ms)
 } esp_now_cmd_t;
 
 typedef struct __attribute__((packed)) {

@@ -57,7 +57,7 @@ static esp_now_status_t g_spot_state[NUM_SPOTS] = {};
 
 // ─── Forward declarations ──────────────────────────────────────────────────────
 static void addPeer(const uint8_t *mac);
-static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness);
+static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0);
 static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version);
 
 // ─── ESP-NOW callbacks ────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ static void addPeer(const uint8_t *mac) {
     esp_now_add_peer(&peer);
 }
 
-static void buildCmdPacket(espnow_cmd_packet_t &pkt, uint8_t spot_id, uint8_t command, uint8_t brightness) {
+static void buildCmdPacket(espnow_cmd_packet_t &pkt, uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0) {
     memset(&pkt, 0, sizeof(pkt));
     pkt.header.msg_type   = MSG_CMD;
     pkt.header.fw_version = FW_VERSION;
@@ -197,11 +197,12 @@ static void buildCmdPacket(espnow_cmd_packet_t &pkt, uint8_t spot_id, uint8_t co
     pkt.cmd.spot_id    = spot_id;
     pkt.cmd.command    = command;
     pkt.cmd.brightness = brightness;
+    pkt.cmd.param      = param;
 }
 
-static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness) {
+static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0) {
     espnow_cmd_packet_t pkt;
-    buildCmdPacket(pkt, spot_id, command, brightness);
+    buildCmdPacket(pkt, spot_id, command, brightness, param);
 
     if (spot_id == 0xFF) {
         esp_now_send(BROADCAST_MAC, (uint8_t *)&pkt, sizeof(pkt));
@@ -522,12 +523,13 @@ static void uart2_poll() {
 // ─── Serial command parser ────────────────────────────────────────────────────
 static void printHelp() {
     Serial.println("Commands:");
-    Serial.println("  on      <spot|all> [bri]   Turn on (bri=0..255, default 255)");
-    Serial.println("  off     <spot|all>         Turn off");
-    Serial.println("  dim     <spot|all> <bri>   Set brightness 0..255");
-    Serial.println("  status  <spot|all>         Request status reply");
-    Serial.println("  version <N>                Self-OTA if master outdated, then WHOIS → spots update");
-    Serial.println("  help                       This message");
+    Serial.println("  on      <spot|all> [bri]        Turn on (bri=0..255, default 255)");
+    Serial.println("  off     <spot|all>              Turn off");
+    Serial.println("  dim     <spot|all> <bri>        Set brightness 0..255");
+    Serial.println("  pulse   <spot|all> [bri] [ms]   Pulse up then down (default bri=100, ms=500)");
+    Serial.println("  status  <spot|all>              Request status reply");
+    Serial.println("  version <N>                     Self-OTA if master outdated, then WHOIS → spots update");
+    Serial.println("  help                            This message");
     Serial.println("  <spot>: 1-254  or  all");
 }
 
@@ -575,6 +577,20 @@ static void processLine(char *line) {
         uint8_t bri = (uint8_t)atoi(bri_tok);
         Serial.printf("[CMD] SET_BRIGHTNESS  spot=0x%02X  bri=%d\n", spot, bri);
         sendCommand(spot, CMD_SET_BRIGHTNESS, bri);
+        return;
+    }
+
+    if (strcasecmp(tok, "pulse") == 0) {
+        char *id_tok  = strtok(nullptr, " \t\r\n");
+        if (!id_tok) { Serial.println("[ERR] Usage: pulse <spot|all> [bri] [ms]"); return; }
+        uint8_t spot = parseSpotId(id_tok);
+        if (!spot) { Serial.println("[ERR] Bad spot ID"); return; }
+        char *bri_tok = strtok(nullptr, " \t\r\n");
+        char *ms_tok  = strtok(nullptr, " \t\r\n");
+        uint8_t bri   = bri_tok ? (uint8_t)atoi(bri_tok) : 100;
+        uint16_t dur  = ms_tok  ? (uint16_t)atoi(ms_tok)  : 500;
+        Serial.printf("[CMD] PULSE  spot=0x%02X  bri=%d  ms=%d\n", spot, bri, dur);
+        sendCommand(spot, CMD_PULSE, bri, dur);
         return;
     }
 

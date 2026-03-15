@@ -116,6 +116,18 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
             thermalPID_reset();
             break;
 
+        case CMD_PULSE: {
+            // Pulse from PWM_MIN_FLOOR to requested brightness and back
+            uint8_t peak = cmd.brightness > 0 ? cmd.brightness : 100;
+            uint16_t dur = cmd.param > 0 ? cmd.param : 500;
+            uint8_t prev = getBrightness();
+            bool was_on = g_is_on;
+            fadeTo(peak, dur / 2);
+            fadeTo(was_on ? prev : 0, dur / 2);
+            if (!was_on) g_is_on = false;
+            break;
+        }
+
         case CMD_REQUEST_STATUS:
             // No state change — just reply below
             break;
