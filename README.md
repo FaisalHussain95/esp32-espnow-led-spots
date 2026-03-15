@@ -155,19 +155,14 @@ GND
 
 The master can send brightness 0–255, but the spot clamps the output to `PWM_MAX` (100) before passing it to the LEDC peripheral.
 
-### Thermal states and PID
+### Thermal states
 
 | Temperature | State | Action |
 |---|---|---|
-| < 60°C | NORMAL | PID inactive, full PWM authority (capped at `PWM_MAX`=100) |
-| 60–75°C | THROTTLING | PID active — holds heatsink near 58°C target using P+I+D correction |
+| < 60°C | NORMAL | Full PWM authority (capped at `PWM_MAX`=100) |
+| 60–75°C | THROTTLING | Linear ramp-down from requested brightness to `PWM_MIN_FLOOR` (20) |
 | 75–85°C | THROTTLING | Hard floor: output clamped to `PWM_MIN_FLOOR` (20) |
 | > 85°C | CRITICAL | Clamped to `PWM_MIN_FLOOR` + immediate ESP-NOW alert to master |
-
-The PID controller (`Kp=8, Ki=0.5, Kd=5`) acts below the hard floor zone, reducing brightness proportionally to how far above the 58°C target the heatsink is.
-The D term pre-acts when temperature is rising even before reaching the target.
-Anti-windup prevents integral accumulation when output is saturated.
-The integral decays at 0.98× per second when the heatsink is cooling.
 
 ### Status LED patterns (GPIO8, active LOW)
 | State | Pattern |
@@ -233,6 +228,7 @@ Full packet types:
 | 0x02 | CMD_TURN_ON | Turn on (with brightness, 300ms fade) |
 | 0x03 | CMD_TURN_OFF | Turn off (500ms fade) |
 | 0x04 | CMD_REQUEST_STATUS | Force immediate status reply |
+| 0x05 | CMD_PULSE | Looping pulse (param = duration in ms, 0 = 500ms default) |
 
 ### Boot Handshake
 ```
@@ -330,12 +326,13 @@ The WiFi bridge publishes MQTT Discovery payloads on connect — spots appear au
 Connect to TTGO on 115200 baud:
 
 ```
-on  <spot|all> [bri]    Turn on (brightness 0–255, default 255)
-off <spot|all>          Turn off
-dim <spot|all> <bri>    Set brightness 0–255
-status <spot|all>       Request immediate status reply
-version <N>             Set required fw version, broadcast OTA to all spots
-help                    List commands
+on    <spot|all> [bri]        Turn on (brightness 0–255, default 255)
+off   <spot|all>              Turn off
+dim   <spot|all> <bri>        Set brightness 0–255
+pulse <spot|all> [bri] [ms]   Pulse loop (default bri=100, ms=500)
+status <spot|all>              Request immediate status reply
+version <N>                    Set required fw version, broadcast OTA to all spots
+help                           List commands
 ```
 
 Examples:
@@ -473,7 +470,6 @@ kicad/diy_led_spot/
 | Spot | `wifi` | `ssid` | string | WiFi SSID (OTA only) |
 | Spot | `wifi` | `password` | string | WiFi password (OTA only) |
 | Master | `espnow` | `pmk` | bytes (16) | Shared PMK |
-| Master | `config` | `fw_version` | uint8 | Required slave fw version |
 
 ---
 
@@ -501,3 +497,4 @@ kicad/diy_led_spot/
 - [ ] Order ×10 production run
 - [ ] Print test enclosures (PLA prototype, then PC for COB side)
 - [ ] Validate thermal performance on first assembled unit
+- [ ] Active cooling: 5V 25mm fan via MT3608 boost converter, EN pin on GPIO4 or GPIO5 — fan ON above 50°C, OFF below 45°C (hysteresis). Parts on order from AliExpress.
