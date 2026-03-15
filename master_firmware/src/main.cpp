@@ -200,7 +200,7 @@ static void buildCmdPacket(espnow_cmd_packet_t &pkt, uint8_t spot_id, uint8_t co
     pkt.cmd.param      = param;
 }
 
-static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0) {
+static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param) {
     espnow_cmd_packet_t pkt;
     buildCmdPacket(pkt, spot_id, command, brightness, param);
 
