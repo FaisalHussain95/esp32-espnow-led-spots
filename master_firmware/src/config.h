@@ -15,7 +15,7 @@
 static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  21   // Master firmware version (for reference)
+#define FW_VERSION  22   // Master firmware version (for reference)
 
 // ─── ESP-NOW Message Types ────────────────────────────────────────────────────
 // Must match spot_firmware/src/config.h exactly.
@@ -39,6 +39,7 @@ static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define THERMAL_NORMAL    0
 #define THERMAL_THROTTLE  1
 #define THERMAL_CRITICAL  2
+#define STATE_PULSE       3
 
 // ─── ESP-NOW Packet Structures ────────────────────────────────────────────────
 // Must match spot_firmware/src/config.h exactly — same wire format.

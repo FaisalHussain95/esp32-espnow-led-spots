@@ -101,8 +101,9 @@ void loop() {
     if (now - g_last_report_ms >= STATUS_REPORT_INTERVAL_MS) {
         g_last_report_ms = now;
         espnow_retryHelloIfNeeded();
-        uint8_t report_bri = g_pulsing ? g_pulse_peak : getBrightness();
-        sendStatus(report_bri, g_temperature, g_thermal_state, g_is_on);
+        uint8_t report_bri   = g_pulsing ? g_pulse_peak : getBrightness();
+        uint8_t report_state = g_pulsing ? STATE_PULSE : g_thermal_state;
+        sendStatus(report_bri, g_temperature, report_state, g_is_on);
     }
 
     // 4. Safety: if master is unreachable, turn off LED
@@ -169,8 +170,9 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
             return;  // Don't send status for unknown commands
     }
 
-    uint8_t report_bri = g_pulsing ? g_pulse_peak : getBrightness();
-    sendStatus(report_bri, g_temperature, g_thermal_state, g_is_on);
+    uint8_t report_bri   = g_pulsing ? g_pulse_peak : getBrightness();
+    uint8_t report_state = g_pulsing ? STATE_PULSE : g_thermal_state;
+    sendStatus(report_bri, g_temperature, report_state, g_is_on);
 }
 
 // ─── Thermal policy ───────────────────────────────────────────────────────────

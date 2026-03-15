@@ -313,6 +313,7 @@ static void updateOLED() {
         oled.setCursor(0, y);
 
         const char *state_icon =
+            (s.thermal_state == STATE_PULSE)      ? "*" :
             (s.thermal_state == THERMAL_CRITICAL) ? "!" :
             (s.thermal_state == THERMAL_THROTTLE) ? "~" : " ";
 
@@ -720,6 +721,7 @@ void loop() {
 
         // Serial log
         const char *state_str =
+            (s.thermal_state == STATE_PULSE)      ? "pulse" :
             (s.thermal_state == THERMAL_CRITICAL) ? "CRITICAL" :
             (s.thermal_state == THERMAL_THROTTLE) ? "THROTTLE" : "normal";
         Serial.printf("[STATUS] spot=0x%02X  %s  bri=%d  temp=%.1f°C  state=%s\n",
