@@ -110,8 +110,8 @@ void loop() {
     if (espnow_masterUnreachable() && g_is_on) {
         Serial.println("[SAFE] Master unreachable — turning off LED");
         g_is_on = false;
+        g_pulsing = false;
         fadeTo(0, 500);
-        thermalPID_reset();
     }
 
     // 5. Status LED heartbeat (non-uniform timing handled inside)
@@ -145,7 +145,7 @@ static void handleCommand(const esp_now_cmd_t &cmd) {
             g_pulsing = false;
             g_is_on = false;
             fadeTo(0, 500);  // 500ms fade-out
-            thermalPID_reset();
+
             break;
 
         case CMD_PULSE: {

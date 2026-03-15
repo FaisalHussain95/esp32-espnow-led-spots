@@ -38,18 +38,9 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define ADC_MAX_VALUE   4095.0f    // 12-bit ADC full scale
 
 // ─── Thermal Thresholds (°C) ──────────────────────────────────────────────────
-#define TEMP_PID_TARGET   58.0f    // PI controller holds heatsink at this temp
-#define TEMP_NORMAL_MAX   60.0f    // Below this: PI inactive, full PWM authority
+#define TEMP_NORMAL_MAX   60.0f    // Below this: full PWM authority
 #define TEMP_THROTTLE_MAX 75.0f    // Above this: hard floor enforced
 #define TEMP_CRITICAL     85.0f    // Above this: CRITICAL — alert master
-
-// ─── Thermal PID Tuning ───────────────────────────────────────────────────────
-// Kp: PWM units reduced per °C above target (increase for faster response)
-// Ki: PWM units reduced per °C·s accumulated (increase to eliminate steady offset)
-// Kd: PWM units reduced per °C/s of rising temp (pre-acts before hitting target)
-#define THERMAL_PID_KP    8.0f
-#define THERMAL_PID_KI    0.5f
-#define THERMAL_PID_KD    5.0f
 
 // ─── Dimming Limits ───────────────────────────────────────────────────────────
 #define PWM_MIN_FLOOR   20         // Minimum PWM in throttle/critical states
@@ -63,7 +54,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define STATUS_LED_OFF_MS          2000   // NORMAL state: LED off duration
 
 // ─── Firmware Version & OTA ───────────────────────────────────────────────────
-#define FW_VERSION  22
+#define FW_VERSION  23
 #define OTA_MAX_ATTEMPTS  5
 #define OTA_RETRY_DELAY_MS  10000
 #define OTA_BASE_URL \
