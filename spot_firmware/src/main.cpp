@@ -27,6 +27,7 @@ static uint32_t g_pulse_phase_start    = 0;
 static void handleCommand(const esp_now_cmd_t &cmd);
 static void runThermalPolicy();
 static void updateStatusLED();
+static void processSerialCommands();
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
@@ -90,6 +91,9 @@ void loop() {
         }
         setBrightness(val);
     }
+
+    // 1d. Local serial commands (for bench testing without master)
+    processSerialCommands();
 
     // 2. Thermal check every 1 second
     if (now - g_last_thermal_ms >= THERMAL_CHECK_INTERVAL_MS) {
@@ -237,5 +241,66 @@ static void updateStatusLED() {
         phase_end_ms = now + 100;               // Fast blink: 100 ms per phase
     } else {
         phase_end_ms = now + (led_on ? STATUS_LED_ON_MS : STATUS_LED_OFF_MS);
+    }
+}
+
+// ─── Local serial command parser (bench test — no master needed) ──────────────
+// Commands (newline-terminated):
+//   on [brightness]   — turn on (default brightness 255)
+//   off               — turn off
+//   dim <0-255>       — set brightness while on
+//   pulse [peak] [ms] — start pulse loop
+//   status            — print current state
+static void processSerialCommands() {
+    static char buf[64];
+    static uint8_t pos = 0;
+
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\r') continue;
+        if (c == '\n' || pos >= sizeof(buf) - 1) {
+            buf[pos] = '\0';
+            pos = 0;
+
+            // Parse into tokens
+            char *token = strtok(buf, " ");
+            if (!token) continue;
+
+            esp_now_cmd_t cmd = {};
+            cmd.spot_id = SPOT_ID;
+
+            if (strcasecmp(token, "on") == 0) {
+                cmd.command    = CMD_TURN_ON;
+                char *bri_str  = strtok(nullptr, " ");
+                cmd.brightness = bri_str ? (uint8_t)atoi(bri_str) : 255;
+            } else if (strcasecmp(token, "off") == 0) {
+                cmd.command    = CMD_TURN_OFF;
+                cmd.brightness = 0;
+            } else if (strcasecmp(token, "dim") == 0) {
+                char *bri_str  = strtok(nullptr, " ");
+                cmd.command    = CMD_SET_BRIGHTNESS;
+                cmd.brightness = bri_str ? (uint8_t)atoi(bri_str) : 128;
+            } else if (strcasecmp(token, "pulse") == 0) {
+                char *peak_str = strtok(nullptr, " ");
+                char *dur_str  = strtok(nullptr, " ");
+                cmd.command    = CMD_PULSE;
+                cmd.brightness = peak_str ? (uint8_t)atoi(peak_str) : 100;
+                cmd.param      = dur_str  ? (uint16_t)atoi(dur_str)  : 500;
+            } else if (strcasecmp(token, "status") == 0) {
+                Serial.printf("[STATUS] id=0x%02X  on=%d  bri=%d  temp=%.1fC  state=%d  pulsing=%d\n",
+                              SPOT_ID, g_is_on, getBrightness(), g_temperature,
+                              g_thermal_state, g_pulsing);
+                continue;
+            } else {
+                Serial.printf("[SERIAL] Unknown: '%s'  (on/off/dim/pulse/status)\n", token);
+                continue;
+            }
+
+            Serial.printf("[SERIAL] cmd=0x%02X bri=%d param=%d\n",
+                          cmd.command, cmd.brightness, cmd.param);
+            handleCommand(cmd);
+        } else {
+            buf[pos++] = c;
+        }
     }
 }
