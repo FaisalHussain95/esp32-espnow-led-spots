@@ -498,7 +498,7 @@
   },
   "schematic": {
     "annotate_start_num": 0,
-    "bom_export_filename": "v2\\diy_led_spot.csv",
+    "bom_export_filename": "v4\\diy_led_spot_step3.csv",
     "bom_fmt_presets": [],
     "bom_fmt_settings": {
       "field_delimiter": ",",

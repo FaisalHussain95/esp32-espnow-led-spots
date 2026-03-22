@@ -267,7 +267,7 @@
       "idf": "",
       "netlist": "",
       "plot": "v4/",
-      "pos_files": "",
+      "pos_files": "v4/",
       "specctra_dsn": "",
       "step": "",
       "svg": "",
