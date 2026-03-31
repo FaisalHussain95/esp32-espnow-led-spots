@@ -387,7 +387,28 @@ cd wifi_bridge_firmware && pio run --target upload
 > **PMK must be identical** on all spots and the master.
 > WiFi credentials on spots are used only for OTA HTTP downloads — not for normal operation.
 
-> **To change credentials after first flash:** add `-DCONFIG_PROV_FORCE_RESET=1` to `build_flags`, flash once (NVS is cleared and rewritten), then remove the flag and reflash.
+### 4. Provision each spot via serial (production workflow)
+
+After flashing, open a serial monitor on the spot (115200 baud) and send:
+
+```
+PROV <spot_id>|<wifi_ssid>|<wifi_password>|<pmk_hex>
+```
+
+Example:
+```
+PROV 3|MyWifi|MyPassword|a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+```
+
+- `spot_id`: decimal integer 1–254
+- `pmk_hex`: 32-char lowercase hex string (same value as `PMK_INPUT` hashed by `inject_credentials.js`)
+- The spot writes all values to NVS and reboots immediately — no second flash needed
+
+On reboot the spot loads credentials from NVS and the build_flags values are ignored.
+
+> **To reprovision an already-flashed unit:** send a new `PROV` command at any time — it overwrites NVS and reboots.
+>
+> **Legacy method (still works):** add `-DCONFIG_PROV_FORCE_RESET=1` to `build_flags`, flash once, then remove the flag and reflash.
 
 ---
 

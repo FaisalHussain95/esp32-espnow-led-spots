@@ -13,3 +13,9 @@ void provisioning_get_pmk(uint8_t pmk_out[16]);
 // Returns the spot ID loaded from NVS (default: CONFIG_SPOT_ID build flag).
 // Must be called after provisioning_init().
 uint8_t provisioning_get_spot_id();
+
+// Overwrite all NVS credentials from arguments. Clears existing values first.
+// pmk_hex must be a 32-char hex string (e.g. "a1b2c3d4...").
+// Returns false and prints an error if pmk_hex is invalid — NVS is not touched.
+// Call ESP.restart() after a successful write to apply the new values.
+bool provisioning_write(uint8_t spot_id, const char *ssid, const char *password, const char *pmk_hex);

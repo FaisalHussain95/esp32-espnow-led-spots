@@ -89,3 +89,32 @@ void provisioning_get_pmk(uint8_t pmk_out[16]) {
 uint8_t provisioning_get_spot_id() {
     return _spot_id;
 }
+
+bool provisioning_write(uint8_t spot_id, const char *ssid, const char *password, const char *pmk_hex) {
+    uint8_t new_pmk[16];
+    if (!hex_to_bytes(pmk_hex, new_pmk, 16)) {
+        Serial.println("[PROV] ERROR: invalid PMK hex (need 32 hex chars)");
+        return false;
+    }
+
+    Preferences prefs;
+    prefs.begin("espnow", false); prefs.clear(); prefs.end();
+    prefs.begin("wifi",   false); prefs.clear(); prefs.end();
+    prefs.begin("spot",   false); prefs.clear(); prefs.end();
+
+    prefs.begin("espnow", false);
+    prefs.putBytes("pmk", new_pmk, 16);
+    prefs.end();
+
+    prefs.begin("spot", false);
+    prefs.putUChar("spot_id", spot_id);
+    prefs.end();
+
+    prefs.begin("wifi", false);
+    prefs.putString("ssid",     ssid);
+    prefs.putString("password", password);
+    prefs.end();
+
+    Serial.printf("[PROV] Written: spot_id=0x%02X  ssid=%s\n", spot_id, ssid);
+    return true;
+}

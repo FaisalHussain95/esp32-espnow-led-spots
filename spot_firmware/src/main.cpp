@@ -279,13 +279,14 @@ static void updateStatusLED() {
 
 // ─── Local serial command parser (bench test — no master needed) ──────────────
 // Commands (newline-terminated):
-//   on [brightness]   — turn on (default brightness 255)
-//   off               — turn off
-//   dim <0-255>       — set brightness while on
-//   pulse [peak] [ms] — start pulse loop
-//   status            — print current state
+//   on [brightness]                        — turn on (default brightness 255)
+//   off                                    — turn off
+//   dim <0-255>                            — set brightness while on
+//   pulse [peak] [ms]                      — start pulse loop
+//   status                                 — print current state
+//   prov <id>|<ssid>|<password>|<pmk_hex> — write NVS credentials and reboot
 static void processSerialCommands() {
-    static char buf[64];
+    static char buf[128];  // 128 bytes: handles PROV with 32-char PMK + typical WiFi creds
     static uint8_t pos = 0;
 
     while (Serial.available()) {
@@ -324,8 +325,30 @@ static void processSerialCommands() {
                               SPOT_ID, g_is_on, getBrightness(), g_temperature,
                               g_thermal_state, g_pulsing);
                 continue;
+            } else if (strcasecmp(token, "prov") == 0) {
+                // PROV <spot_id>|<ssid>|<password>|<pmk_hex>
+                char *rest   = strtok(nullptr, "");
+                if (!rest) { Serial.println("[PROV] Usage: PROV <id>|<ssid>|<password>|<pmk_hex>"); continue; }
+                char *id_str = strtok(rest,    "|");
+                char *ssid   = strtok(nullptr, "|");
+                char *passwd = strtok(nullptr, "|");
+                char *pmk    = strtok(nullptr, "|");
+                if (!id_str || !ssid || !passwd || !pmk) {
+                    Serial.println("[PROV] ERROR: expected PROV <id>|<ssid>|<password>|<pmk_hex>");
+                    continue;
+                }
+                int id = atoi(id_str);
+                if (id < 1 || id > 254) {
+                    Serial.printf("[PROV] ERROR: spot_id %d out of range (1–254)\n", id);
+                    continue;
+                }
+                if (!provisioning_write((uint8_t)id, ssid, passwd, pmk)) continue;
+                Serial.println("[PROV] Rebooting to apply...");
+                delay(200);
+                ESP.restart();
+                continue;
             } else {
-                Serial.printf("[SERIAL] Unknown: '%s'  (on/off/dim/pulse/status)\n", token);
+                Serial.printf("[SERIAL] Unknown: '%s'  (on/off/dim/pulse/status/prov)\n", token);
                 continue;
             }
 
