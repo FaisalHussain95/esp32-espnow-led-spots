@@ -2037,13 +2037,13 @@
 		(embedded_fonts no)
 		(model "${EASYEDA2KICAD}/easyeda2kicad.3dshapes/SOT-23-3P_L2.9-W1.3-H1.0-LS2.4-P0.95.wrl"
 			(offset
-				(xyz -861.57 843.28 -0)
+				(xyz 0 0 0)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 180)
+				(xyz -0 -0 180)
 			)
 		)
 	)
@@ -15665,7 +15665,7 @@
 		(uuid "da2b51b1-8599-4a24-a97b-068e4ff1cd6d")
 		(at 122 77 -90)
 		(property "Reference" "U2"
-			(at -3.5 0 180)
+			(at -3.5 0 0)
 			(layer "F.SilkS")
 			(uuid "60388732-6e71-4283-ae87-f2d923ec4787")
 			(effects
@@ -15837,13 +15837,13 @@
 		(embedded_fonts no)
 		(model "${EASYEDA2KICAD}/easyeda2kicad.3dshapes/SOT-89-5_L4.5-W2.5-H1.5-LS4.1-P1.50.wrl"
 			(offset
-				(xyz -903.83 848.71 -0)
+				(xyz 0 0 -0)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 180)
+				(xyz -0 -0 180)
 			)
 		)
 	)

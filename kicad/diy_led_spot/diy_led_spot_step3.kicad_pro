@@ -269,7 +269,7 @@
       "plot": "v4/",
       "pos_files": "v4/",
       "specctra_dsn": "",
-      "step": "",
+      "step": "diy_led_spot_v4.step",
       "svg": "",
       "vrml": ""
     },
