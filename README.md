@@ -497,4 +497,4 @@ kicad/diy_led_spot/
 - [ ] Order ×10 production run
 - [ ] Print test enclosures (PLA prototype, then PC for COB side)
 - [ ] Validate thermal performance on first assembled unit
-- [ ] Active cooling: 5V 25mm fan via MT3608 boost converter, EN pin on GPIO4 or GPIO5 — fan ON above 50°C, OFF below 45°C (hysteresis). Parts on order from AliExpress.
+- [x] Active cooling: 5V 25mm fan via MT3608 boost converter (GPIO5 EN) + AO3400 MOSFET (GPIO4) — fan ON above 50°C, OFF below 45°C (hysteresis), forced ON on NTC fault. PCB rev includes MT3608 + MOSFET footprint.

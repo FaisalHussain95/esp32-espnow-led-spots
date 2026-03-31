@@ -23,6 +23,14 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define STATUS_LED_ON   LOW  // GPIO8 onboard LED lights when driven LOW
 #define STATUS_LED_OFF  HIGH
 
+// ─── Fan Control ──────────────────────────────────────────────────────────────
+#define PIN_FAN_PWM      4   // AO3400 gate — GPIO output drives fan MOSFET
+#define PIN_FAN_EN       5   // MT3608 EN — drive HIGH to enable 5V boost rail
+
+#define FAN_ON_TEMP     50.0f  // Turn fan on above this (°C)
+#define FAN_OFF_TEMP    45.0f  // Turn fan off below this (°C) — hysteresis
+#define FAN_BOOST_DELAY_MS  2  // Wait after enabling MT3608 before driving MOSFET
+
 // ─── LEDC (PWM) Configuration ─────────────────────────────────────────────────
 #define LEDC_CHANNEL     0
 #define LEDC_TIMER       0

@@ -15,6 +15,7 @@ static float    g_temperature          = 0.0f;
 static uint8_t  g_thermal_state        = THERMAL_NORMAL;
 static uint32_t g_last_thermal_ms      = 0;
 static uint32_t g_last_report_ms       = 0;
+static bool     g_fan_on               = false;
 
 // Pulse loop state
 static bool     g_pulsing              = false;
@@ -26,6 +27,7 @@ static uint32_t g_pulse_phase_start    = 0;
 // ─── Forward declarations ─────────────────────────────────────────────────────
 static void handleCommand(const esp_now_cmd_t &cmd);
 static void runThermalPolicy();
+static void runFanPolicy();
 static void updateStatusLED();
 static void processSerialCommands();
 
@@ -37,6 +39,12 @@ void setup() {
 
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, STATUS_LED_OFF);
+
+    // Fan GPIOs — both must be configured as outputs (PCB requirement)
+    pinMode(PIN_FAN_EN,  OUTPUT);
+    pinMode(PIN_FAN_PWM, OUTPUT);
+    digitalWrite(PIN_FAN_EN,  LOW);   // MT3608 off at boot
+    digitalWrite(PIN_FAN_PWM, LOW);   // MOSFET off at boot
 
     // Write PMK + WiFi creds + spot ID to NVS on first boot
     provisioning_init();
@@ -185,9 +193,16 @@ static void runThermalPolicy() {
 
     // NTC fault (open or shorted cable) — cut output for safety
     if (temp < -100.0f) {
-        Serial.println("[WARN] NTC fault — cutting to minimum");
+        Serial.println("[WARN] NTC fault — cutting to minimum, forcing fan ON");
         setBrightness(PWM_MIN_FLOOR);
         g_thermal_state = THERMAL_CRITICAL;
+        // No temperature data — run fan at full speed as a precaution
+        if (!g_fan_on) {
+            g_fan_on = true;
+            digitalWrite(PIN_FAN_EN,  HIGH);
+            delay(FAN_BOOST_DELAY_MS);
+            digitalWrite(PIN_FAN_PWM, HIGH);
+        }
         sendStatus(getBrightness(), -999.0f, THERMAL_CRITICAL, g_is_on);
         return;
     }
@@ -205,6 +220,7 @@ static void runThermalPolicy() {
     bool became_critical = (new_state == THERMAL_CRITICAL &&
                              g_thermal_state != THERMAL_CRITICAL);
     g_thermal_state = new_state;
+    runFanPolicy();
 
     if (became_critical) {
         Serial.printf("[CRIT] Temp=%.1f°C — alerting master\n", temp);
@@ -213,6 +229,23 @@ static void runThermalPolicy() {
 
     Serial.printf("[THERM] %.1f°C  state=%d  pwm=%d\n",
                   temp, g_thermal_state, getBrightness());
+}
+
+// ─── Fan policy ───────────────────────────────────────────────────────────────
+// ON ≥ 50°C / OFF ≤ 45°C (hysteresis). MT3608 EN gated with 2ms startup delay.
+static void runFanPolicy() {
+    if (!g_fan_on && g_temperature >= FAN_ON_TEMP) {
+        g_fan_on = true;
+        digitalWrite(PIN_FAN_EN,  HIGH);
+        delay(FAN_BOOST_DELAY_MS);         // Let MT3608 start up before driving MOSFET
+        digitalWrite(PIN_FAN_PWM, HIGH);
+        Serial.printf("[FAN] ON  (%.1f°C)\n", g_temperature);
+    } else if (g_fan_on && g_temperature <= FAN_OFF_TEMP) {
+        g_fan_on = false;
+        digitalWrite(PIN_FAN_PWM, LOW);
+        digitalWrite(PIN_FAN_EN,  LOW);
+        Serial.printf("[FAN] OFF (%.1f°C)\n", g_temperature);
+    }
 }
 
 // ─── Status LED ───────────────────────────────────────────────────────────────
