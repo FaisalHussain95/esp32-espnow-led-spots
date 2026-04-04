@@ -34,7 +34,7 @@ static void processSerialCommands();
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    delay(1500);  // Wait for USB CDC to reconnect after reset (C3 SuperMini)
+    delay(100);   // Minimal stabilisation delay — no USB CDC needed in production
     WiFi.mode(WIFI_STA);
 
     pinMode(PIN_STATUS_LED, OUTPUT);
