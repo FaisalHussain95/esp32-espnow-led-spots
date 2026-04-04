@@ -9,8 +9,8 @@
 
 // ─── Global state ─────────────────────────────────────────────────────────────
 uint8_t         SPOT_ID                = 0x01;  // Overwritten from NVS in setup()
-static uint8_t  g_requested_brightness = 255;  // Master's intended brightness
-static bool     g_is_on                = false;
+static uint8_t  g_requested_brightness = PWM_MAX;  // Master's intended brightness
+static bool     g_is_on                = true;     // Default ON — mains switch acts as power control
 static float    g_temperature          = 0.0f;
 static uint8_t  g_thermal_state        = THERMAL_NORMAL;
 static uint32_t g_last_thermal_ms      = 0;
@@ -59,6 +59,9 @@ void setup() {
 
     dimming_init();
     espnow_init();  // Loads PMK, enables encryption, sends MSG_HELLO to master
+
+    // Default ON — spot lights up immediately when mains power is applied
+    setBrightness(g_requested_brightness);
 
     Serial.println("[BOOT] Ready.");
 }
@@ -116,14 +119,6 @@ void loop() {
         uint8_t report_bri   = g_pulsing ? g_pulse_peak : getBrightness();
         uint8_t report_state = g_pulsing ? STATE_PULSE : g_thermal_state;
         sendStatus(report_bri, g_temperature, report_state, g_is_on);
-    }
-
-    // 4. Safety: if master is unreachable, turn off LED
-    if (espnow_masterUnreachable() && g_is_on) {
-        Serial.println("[SAFE] Master unreachable — turning off LED");
-        g_is_on = false;
-        g_pulsing = false;
-        fadeTo(0, 500);
     }
 
     // 5. Status LED heartbeat (non-uniform timing handled inside)

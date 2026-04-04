@@ -150,16 +150,16 @@ GND
 ### PWM limits
 | Constant | Value | Reason |
 |---|---|---|
-| `PWM_MAX` | 100 | Hardware ceiling — driving above 100 overloads the heatsink (measured 54°C at PWM=100 full load) |
+| `PWM_MAX` | 160 | ~5W operating point for COB LED |
 | `PWM_MIN_FLOOR` | 20 | Minimum allowed in throttle/critical states |
 
-The master can send brightness 0–255, but the spot clamps the output to `PWM_MAX` (100) before passing it to the LEDC peripheral.
+The master can send brightness 0–255, but the spot clamps the output to `PWM_MAX` (160) before passing it to the LEDC peripheral.
 
 ### Thermal states
 
 | Temperature | State | Action |
 |---|---|---|
-| < 60°C | NORMAL | Full PWM authority (capped at `PWM_MAX`=100) |
+| < 60°C | NORMAL | Full PWM authority (capped at `PWM_MAX`=160) |
 | 60–75°C | THROTTLING | Linear ramp-down from requested brightness to `PWM_MIN_FLOOR` (20) |
 | 75–85°C | THROTTLING | Hard floor: output clamped to `PWM_MIN_FLOOR` (20) |
 | > 85°C | CRITICAL | Clamped to `PWM_MIN_FLOOR` + immediate ESP-NOW alert to master |
@@ -518,4 +518,5 @@ kicad/diy_led_spot/
 - [ ] Order ×10 production run
 - [ ] Print test enclosures (PLA prototype, then PC for COB side)
 - [ ] Validate thermal performance on first assembled unit
-- [x] Active cooling: 5V 25mm fan via MT3608 boost converter (GPIO5 EN) + AO3400 MOSFET (GPIO4) — fan ON above 50°C, OFF below 45°C (hysteresis), forced ON on NTC fault. PCB rev includes MT3608 + MOSFET footprint.
+- [x] Active cooling: 5V 25mm fan via MT3608 boost converter (GPIO5 EN) + AO3400 MOSFET (GPIO4) — fan ON above 45°C, OFF below 40°C (hysteresis), forced ON on NTC fault. PCB rev includes MT3608 + MOSFET footprint.
+- [x] Default boot state: ON — spot lights up immediately when mains power is applied; mains switch acts as physical on/off control without requiring master commands.

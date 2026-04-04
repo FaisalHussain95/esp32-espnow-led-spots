@@ -27,8 +27,8 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 #define PIN_FAN_PWM      4   // AO3400 gate — GPIO output drives fan MOSFET
 #define PIN_FAN_EN       5   // MT3608 EN — drive HIGH to enable 5V boost rail
 
-#define FAN_ON_TEMP     50.0f  // Turn fan on above this (°C)
-#define FAN_OFF_TEMP    45.0f  // Turn fan off below this (°C) — hysteresis
+#define FAN_ON_TEMP     45.0f  // Turn fan on above this (°C)
+#define FAN_OFF_TEMP    40.0f  // Turn fan off below this (°C) — hysteresis
 #define FAN_BOOST_DELAY_MS  2  // Wait after enabling MT3608 before driving MOSFET
 
 // ─── LEDC (PWM) Configuration ─────────────────────────────────────────────────
@@ -52,7 +52,7 @@ static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
 
 // ─── Dimming Limits ───────────────────────────────────────────────────────────
 #define PWM_MIN_FLOOR   20         // Minimum PWM in throttle/critical states
-#define PWM_MAX        100         // Hardware limit: >100 overdrives heatsink
+#define PWM_MAX        160         // ~5W operating point for COB LED
 
 // ─── Timing (ms) ──────────────────────────────────────────────────────────────
 #define THERMAL_CHECK_INTERVAL_MS  1000
