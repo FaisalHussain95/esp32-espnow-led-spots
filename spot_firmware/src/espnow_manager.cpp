@@ -92,7 +92,7 @@ static void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 void espnow_init() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_max_tx_power(52);  // 13dBm — balance TX range vs 3.3V current spikes
     int8_t tx_power = 0;
     esp_wifi_get_max_tx_power(&tx_power);

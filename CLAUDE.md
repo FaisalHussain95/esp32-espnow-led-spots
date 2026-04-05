@@ -43,7 +43,7 @@ Home Assistant (MQTT)
 [wifi_bridge_firmware] (generic ESP32, GPIO17/16 UART2)
         ↕ UART2 binary frames (115200 baud)
 [master_firmware] (TTGO LoRa32, GPIO13/35 UART2)
-        ↕ ESP-NOW encrypted (PMK AES-128, WiFi ch1)
+        ↕ ESP-NOW encrypted (PMK AES-128, WiFi ch11)
 [spot_firmware × N] (ESP32-C3 SuperMini, up to 254 spots)
 ```
 

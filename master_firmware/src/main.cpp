@@ -345,7 +345,7 @@ static void updateOLED() {
 static void espnow_reinit() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_STA);
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
     if (esp_now_init() != ESP_OK) {
         Serial.println("[ERR] ESP-NOW re-init failed after OTA");
         return;
@@ -651,7 +651,7 @@ void setup() {
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
     Serial.printf("[BOOT] Master — MAC: %s  CH: %d\n",
                   WiFi.macAddress().c_str(), WiFi.channel());
 
