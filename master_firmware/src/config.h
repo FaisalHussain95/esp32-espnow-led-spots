@@ -18,7 +18,7 @@ static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define ESPNOW_CHANNEL  11   // WiFi channel for all ESP-NOW traffic (1, 6, or 11)
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  27   // Master firmware version (for reference)
+#define FW_VERSION  28   // Master firmware version (for reference)
 
 // ─── ESP-NOW Message Types ────────────────────────────────────────────────────
 // Must match spot_firmware/src/config.h exactly.
