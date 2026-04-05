@@ -38,10 +38,6 @@ static int maxCount() {
     return m;
 }
 
-static int avgRssi(int ch) {
-    if (ch_count[ch] == 0) return 0;
-    return ch_rssi_sum[ch] / ch_count[ch];
-}
 
 // ─── Display ─────────────────────────────────────────────────────────────────
 // Layout (128×64):
@@ -103,30 +99,8 @@ static void drawChart(uint32_t scanDuration) {
     display.display();
 }
 
-// ─── Serial summary ──────────────────────────────────────────────────────────
-static void printSerial(int totalAPs) {
-    Serial.println("\n── WiFi Channel Scan ────────────────────────────────");
-    Serial.printf("  Total APs found: %d\n", totalAPs);
-    Serial.println("  Ch  APs  AvgRSSI  Bar");
-    for (int ch = 1; ch <= NUM_CHANNELS; ch++) {
-        Serial.printf("  %2d  %3d", ch, ch_count[ch]);
-        if (ch_count[ch] > 0)
-            Serial.printf("   %4d dBm  ", avgRssi(ch));
-        else
-            Serial.print("           ");
-
-        // ASCII bar
-        int bar = ch_count[ch] * 2;
-        for (int i = 0; i < bar; i++) Serial.print('|');
-        Serial.println();
-    }
-    Serial.println("─────────────────────────────────────────────────────");
-}
-
 // ─── Scan ────────────────────────────────────────────────────────────────────
 static uint32_t lastScanTime = 0;
-static uint32_t lastScanDuration = 0;
-static bool scanning = false;
 
 static void startScan() {
     memset(ch_count,    0, sizeof(ch_count));
@@ -153,8 +127,18 @@ static void startScan() {
         }
     }
 
+    // Print AP names before scanDelete wipes the results
+    Serial.println("\n── WiFi Channel Scan ────────────────────────────────");
+    Serial.printf("  Total APs found: %d\n", n);
+    Serial.println("  Ch  RSSI  SSID");
+    for (int i = 0; i < n; i++) {
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0) ssid = "(hidden)";
+        Serial.printf("  %2d  %4d dBm  %s\n", WiFi.channel(i), WiFi.RSSI(i), ssid.c_str());
+    }
+    Serial.println("─────────────────────────────────────────────────────");
+
     WiFi.scanDelete();
-    printSerial(n);
 }
 
 // ─── Setup / Loop ─────────────────────────────────────────────────────────────
@@ -186,9 +170,7 @@ void setup() {
     delay(100);
 
     // First scan immediately
-    uint32_t t0 = millis();
     startScan();
-    lastScanDuration = millis() - t0;
     lastScanTime = millis();
     drawChart(0);
 }
@@ -196,9 +178,7 @@ void setup() {
 void loop() {
     uint32_t now = millis();
     if (now - lastScanTime >= SCAN_INTERVAL) {
-        uint32_t t0 = millis();
         startScan();
-        lastScanDuration = millis() - t0;
         lastScanTime = millis();
     }
     drawChart(millis() - lastScanTime);
