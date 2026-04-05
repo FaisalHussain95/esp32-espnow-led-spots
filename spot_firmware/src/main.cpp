@@ -60,8 +60,8 @@ void setup() {
     dimming_init();
     espnow_init();  // Loads PMK, enables encryption, sends MSG_HELLO to master
 
-    // Default ON — spot lights up immediately when mains power is applied
-    setBrightness(g_requested_brightness);
+    // Default ON — fade in on boot so the light doesn't snap on abruptly
+    fadeTo(g_requested_brightness, 1500);  // 1.5 s fade-in
 
     Serial.println("[BOOT] Ready.");
 }
