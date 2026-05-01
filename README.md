@@ -96,8 +96,51 @@ The driver electronics sit on a custom KiCad board that fits inside the spot she
 
 ---
 
-## How it works (briefly)
+## How it works
 
 Each spot is an ESP32-C3 node. A TTGO LoRa32 acts as master. A third ESP32 bridges MQTT to the master over UART. The spots never touch WiFi during normal operation — everything runs over ESP-NOW on a dedicated channel.
+
+```mermaid
+sequenceDiagram
+    participant HA as Home Assistant
+    participant BR as WiFi Bridge<br/>(generic ESP32)
+    participant MA as Master<br/>(TTGO LoRa32)
+    participant SP as Spot × N<br/>(ESP32-C3)
+    participant GH as GitHub Releases<br/>(OTA)
+
+    note over SP,MA: ── Boot handshake (ESP-NOW ch11, AES-128) ──
+    SP->>MA: MSG_HELLO {spot_id, fw_version}
+    alt version OK
+        MA->>SP: MSG_ACK
+    else version outdated
+        MA->>SP: MSG_REJECT + MSG_OTA_NOW {target_version}
+        SP->>GH: HTTP GET slave_c3_supermini_vN.bin
+        GH-->>SP: firmware binary → flash & reboot
+    end
+
+    note over MA: Master reboot → rediscover all spots
+    MA->>SP: MSG_WHOIS (broadcast)
+    SP->>MA: MSG_HELLO (re-announce)
+
+    note over HA,SP: ── Normal operation ──
+    HA->>BR: MQTT homeassistant/led_spots/{id}/set<br/>{"state":"ON","brightness":200}
+    BR->>MA: UART2 frame 0xAA 0x01 spot_id bri cmd 0x55
+    MA->>SP: MSG_CMD {spot_id, CMD_TURN_ON, brightness}
+
+    SP-->>MA: MSG_STATUS every 10 s<br/>{spot_id, brightness, temp°C, thermal_state, is_on}
+    MA-->>BR: UART2 frame 0xAA 0x02 spot_id bri temp_hi temp_lo thermal 0x55
+    BR-->>HA: MQTT homeassistant/led_spots/{id}/state<br/>{"state":"ON","brightness":200,"temperature":42.3}
+
+    note over SP: ── Thermal protection (on-spot) ──
+    SP->>SP: NTC read every 1 s<br/>60°C → throttle PWM<br/>85°C → PWM floor + alert
+    SP-->>MA: MSG_STATUS {thermal_state: critical}
+
+    note over HA,GH: ── OTA triggered from HA ──
+    HA->>BR: MQTT homeassistant/led_spots/ota/set {"version":29}
+    BR->>MA: UART2 frame 0xAA 0x03 target_version 0x55
+    MA->>SP: MSG_OTA_NOW {target_version} (broadcast)
+    SP->>GH: HTTP GET slave_c3_supermini_v29.bin
+    GH-->>SP: firmware binary → flash & reboot
+```
 
 For the full technical details, wiring, firmware architecture, and PCB design see [TECHNICAL.md](TECHNICAL.md).
