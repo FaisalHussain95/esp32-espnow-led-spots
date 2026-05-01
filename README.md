@@ -2,6 +2,22 @@
 
 Replacing 13 cheap 220V ceiling spots with custom COB LED units — dimmable, Home Assistant integrated, actively cooled, and wirelessly controlled over ESP-NOW.
 
+```mermaid
+graph LR
+    HA[🏠 Home Assistant]
+    BR[WiFi Bridge\nESP32]
+    MA[Master\nTTGO LoRa32]
+    S1[Spot 1\nESP32-C3]
+    S2[Spot 2\nESP32-C3]
+    SN[Spot 3…13\nESP32-C3]
+
+    HA <-->|MQTT / WiFi| BR
+    BR <-->|UART 115200| MA
+    MA <-->|ESP-NOW ch11\nAES-128| S1
+    MA <-->|ESP-NOW ch11\nAES-128| S2
+    MA <-->|ESP-NOW ch11\nAES-128| SN
+```
+
 ---
 
 ## The problem
