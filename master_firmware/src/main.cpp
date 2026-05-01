@@ -29,9 +29,7 @@ static const uint8_t _required_fw_version = FW_VERSION;
 static Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST);
 
 // ─── Receive buffer (ISR → loop bridge) ───────────────────────────────────────
-// Two separate volatile buffers: one for status packets, one for events
-static volatile bool    _status_available  = false;
-static volatile bool    _hello_available   = false;
+static volatile bool    _status_available   = false;
 static volatile bool    _ota_fail_available = false;
 
 static esp_now_status_t  _status_buffer;
@@ -44,7 +42,12 @@ typedef struct {
     uint8_t fw_version;
     uint8_t spot_id;
 } hello_event_t;
-static hello_event_t _hello_buffer;
+
+// Ring buffer for HELLO events — sized to absorb a full simultaneous boot burst.
+#define HELLO_RING_SIZE 16
+static hello_event_t     _hello_ring[HELLO_RING_SIZE];
+static volatile uint8_t  _hello_head = 0;  // ISR writes here
+static volatile uint8_t  _hello_tail = 0;  // loop reads here
 
 typedef struct {
     uint8_t spot_id;
@@ -75,10 +78,13 @@ static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
             break;
         }
         case MSG_HELLO: {
-            memcpy((void *)_hello_buffer.mac, hdr->mac, 6);
-            _hello_buffer.fw_version = hdr->fw_version;
-            _hello_buffer.spot_id    = hdr->attempt;  // spot_id carried in attempt field
-            _hello_available = true;
+            uint8_t next = (_hello_head + 1) % HELLO_RING_SIZE;
+            if (next != _hello_tail) {  // drop if full (shouldn't happen with 8 slots)
+                memcpy(_hello_ring[_hello_head].mac, hdr->mac, 6);
+                _hello_ring[_hello_head].fw_version = hdr->fw_version;
+                _hello_ring[_hello_head].spot_id    = hdr->attempt;
+                _hello_head = next;
+            }
             break;
         }
         case MSG_OTA_FAILED: {
@@ -687,11 +693,10 @@ static uint8_t _line_len = 0;
 
 void loop() {
     // 1. Handle HELLO from spots (dynamic peer registration + version check)
-    if (_hello_available) {
-        _hello_available = false;
-        uint8_t mac[6];
-        memcpy(mac, (const void *)_hello_buffer.mac, 6);
-        handleHello(mac, _hello_buffer.fw_version, _hello_buffer.spot_id);
+    while (_hello_tail != _hello_head) {
+        hello_event_t ev = _hello_ring[_hello_tail];
+        _hello_tail = (_hello_tail + 1) % HELLO_RING_SIZE;
+        handleHello(ev.mac, ev.fw_version, ev.spot_id);
     }
 
     // 2. Process received status packets

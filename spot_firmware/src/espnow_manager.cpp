@@ -123,7 +123,10 @@ void espnow_init() {
     bcast_peer.ifidx   = WIFI_IF_STA;
     esp_now_add_peer(&bcast_peer);  // may already exist — OK
 
-    // Send MSG_HELLO via broadcast so master always receives it
+    // Send MSG_HELLO via broadcast so master always receives it.
+    // Stagger by spot_id so simultaneous power-on doesn't flood the master.
+    delay(SPOT_ID * 200);
+
     _hello_acked = false;
     uint8_t self_mac[6];
     WiFi.macAddress(self_mac);
