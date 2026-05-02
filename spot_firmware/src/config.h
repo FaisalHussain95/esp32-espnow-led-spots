@@ -8,7 +8,7 @@
 extern uint8_t SPOT_ID;
 
 // Master MAC — the spot sends status/hello to this address.
-static const uint8_t MASTER_MAC[6] = {0x24, 0x6F, 0x28, 0xB1, 0xC3, 0x2C};
+static const uint8_t MASTER_MAC[6] = {0x10, 0x00, 0x3B, 0xB8, 0x52, 0x7C};
 
 // ─── GPIO Pin Assignments ─────────────────────────────────────────────────────
 // ESP32 WROVER (prototype)
