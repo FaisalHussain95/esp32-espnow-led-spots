@@ -1,11 +1,11 @@
 #pragma once
 #include <stdint.h>
 
-// ─── UART2 Bridge (to WiFi ESP32-B) ──────────────────────────────────────────
-// GPIO13 = TX → ESP32-B RX
-// GPIO35 = RX ← ESP32-B TX  (input-only pin, safe at boot, no strapping role)
-#define PIN_UART2_TX  13
-#define PIN_UART2_RX  35
+// ─── UART1 Bridge (to WiFi ESP32-C3-B) ───────────────────────────────────────
+// GPIO6 = TX → Bridge RX
+// GPIO7 = RX ← Bridge TX
+#define PIN_UART1_TX  6
+#define PIN_UART1_RX  7
 
 // Spots register dynamically on HELLO — no MAC table needed.
 // spot_id range: 0x01–0xFE (0xFF reserved for broadcast)

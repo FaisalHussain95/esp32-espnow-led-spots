@@ -8,12 +8,11 @@
 #define MQTT_USER        CONFIG_MQTT_USER
 #define MQTT_PASSWORD    CONFIG_MQTT_PASSWORD
 
-// ─── UART2 pins (connect to TTGO LoRa32) ──────────────────────────────────────
-// ESP32-B GPIO_TX → TTGO GPIO35 (RX)
-// ESP32-B GPIO_RX ← TTGO GPIO13 (TX)
-// Choose any free GPIOs on the generic ESP32 dev board:
-#define PIN_UART2_TX  17
-#define PIN_UART2_RX  16
+// ─── UART1 pins (connect to Master ESP32-C3) ──────────────────────────────────
+// Bridge GPIO6 TX → Master GPIO7 RX
+// Bridge GPIO7 RX ← Master GPIO6 TX
+#define PIN_UART1_TX  6
+#define PIN_UART1_RX  7
 
 // ─── MQTT topic prefix ────────────────────────────────────────────────────────
 // Command:  homeassistant/led_spots/<id>/set    (subscribed)

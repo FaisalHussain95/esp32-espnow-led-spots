@@ -4,8 +4,6 @@
 #include <esp_wifi.h>
 #include <Preferences.h>
 #include <HTTPUpdate.h>
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -18,15 +16,14 @@ static uint8_t _pmk[16] = {};
 static const uint8_t _required_fw_version = FW_VERSION;
 
 // ─── OLED ─────────────────────────────────────────────────────────────────────
-// TTGO LoRa32 V1.0/V1.2: SSD1306 128×64, I2C on SDA=4, SCL=15, RST=16
+// ESP32-C3 SuperMini: SSD1306 128×32, I2C on SDA=GPIO1, SCL=GPIO0, no RST pin
 #define OLED_WIDTH   128
-#define OLED_HEIGHT   64
+#define OLED_HEIGHT   32
 #define OLED_ADDR   0x3C
-#define OLED_SDA       4
-#define OLED_SCL      15
-#define OLED_RST      16
+#define OLED_SDA       1
+#define OLED_SCL       0
 
-static Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST);
+static Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 
 // ─── Receive buffer (ISR → loop bridge) ───────────────────────────────────────
 static volatile bool    _status_available   = false;
@@ -62,6 +59,7 @@ static esp_now_status_t g_spot_state[NUM_SPOTS] = {};
 static void addPeer(const uint8_t *mac);
 static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0);
 static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version);
+static void updateOLED();
 
 // ─── ESP-NOW callbacks ────────────────────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
@@ -280,6 +278,9 @@ static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spo
         g_spot_state[spot_id - 1].spot_id = spot_id;
     }
 
+    // Small delay so the newly registered peer is ready before we send
+    delay(5);
+
     if (spot_fw_version >= _required_fw_version) {
         sendAck(mac);
         Serial.printf("[HELLO] → ACK (fw ok)\n");
@@ -290,14 +291,17 @@ static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spo
 
     // Notify bridge (UART2) of handshake
     uart2_send_handshake(spot_id, spot_fw_version);
+
+    // Refresh OLED immediately so newly discovered spots appear
+    updateOLED();
 }
 
 // ─── OLED display ─────────────────────────────────────────────────────────────
 // Shows the last received status for each known spot, 1 row per spot.
-// Layout (128×64, 8px rows):
+// Layout (128×32, 8px rows):
 //   Row 0: "MASTER  LED SPOTS"
 //   Row 1: separator line
-//   Row 2..7: "S1 ON  255 24.3C!"  (one spot per row, up to 6)
+//   Row 2..3: "S1 ON  255 24.3C!"  (up to 2 spots)
 
 static void updateOLED() {
     oled.clearDisplay();
@@ -309,13 +313,13 @@ static void updateOLED() {
     oled.print("MASTER  LED SPOTS");
     oled.drawLine(0, 9, OLED_WIDTH - 1, 9, SSD1306_WHITE);
 
-    // One row per spot that has reported in
+    // One row per spot that has reported in (max 2 rows on 128×32)
     int row = 0;
-    for (int i = 0; i < NUM_SPOTS && row < 6; i++) {
+    for (int i = 0; i < NUM_SPOTS && row < 2; i++) {
         const esp_now_status_t &s = g_spot_state[i];
-        if (s.spot_id == 0) continue;  // Never heard from this spot
+        if (s.spot_id == 0) continue;
 
-        int y = 12 + row * 9;
+        int y = 12 + row * 10;
         oled.setCursor(0, y);
 
         const char *state_icon =
@@ -323,7 +327,6 @@ static void updateOLED() {
             (s.thermal_state == THERMAL_CRITICAL) ? "!" :
             (s.thermal_state == THERMAL_THROTTLE) ? "~" : " ";
 
-        // "S1 ON  255 24.3C !"  (fits 128px at size=1, 6px/char = 21 chars)
         char buf[24];
         snprintf(buf, sizeof(buf), "S%d %s %3d %5.1fC%s",
                  s.spot_id,
@@ -336,7 +339,7 @@ static void updateOLED() {
     }
 
     if (row == 0) {
-        oled.setCursor(0, 28);
+        oled.setCursor(0, 20);
         oled.print("Waiting for spots...");
     }
 
@@ -468,7 +471,7 @@ static void master_ota_start(uint8_t target_version) {
 // Frame: 0xAA 0x04 spot_id fw_version 0x55
 static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version) {
     uint8_t frame[5] = { UART2_START, UART2_HANDSHAKE, spot_id, fw_version, UART2_END };
-    Serial2.write(frame, 5);
+    Serial1.write(frame, 5);
 }
 
 static void uart2_send_status(const esp_now_status_t &s) {
@@ -483,15 +486,15 @@ static void uart2_send_status(const esp_now_status_t &s) {
     frame[6] = s.thermal_state;
     frame[7] = s.is_on ? 1 : 0;
     frame[8] = UART2_END;
-    Serial2.write(frame, 9);
+    Serial1.write(frame, 9);
 }
 
 static uint8_t _u2buf[8];
 static uint8_t _u2len = 0;
 
 static void uart2_poll() {
-    while (Serial2.available()) {
-        uint8_t b = (uint8_t)Serial2.read();
+    while (Serial1.available()) {
+        uint8_t b = (uint8_t)Serial1.read();
 
         if (_u2len == 0) {
             if (b == UART2_START) _u2buf[_u2len++] = b;
@@ -630,15 +633,9 @@ static void processLine(char *line) {
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Disable brownout reset
     Serial.begin(115200);
-    Serial2.begin(115200, SERIAL_8N1, PIN_UART2_RX, PIN_UART2_TX);
+    Serial1.begin(115200, SERIAL_8N1, PIN_UART1_RX, PIN_UART1_TX);
     delay(200);
-
-    pinMode(OLED_RST, OUTPUT);
-    digitalWrite(OLED_RST, LOW);
-    delay(10);
-    digitalWrite(OLED_RST, HIGH);
 
     Wire.begin(OLED_SDA, OLED_SCL);
     if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {

@@ -126,8 +126,8 @@ static void uart2_process_status(const uint8_t *frame) {
 }
 
 static void uart2_poll() {
-    while (Serial2.available()) {
-        uint8_t b = (uint8_t)Serial2.read();
+    while (Serial1.available()) {
+        uint8_t b = (uint8_t)Serial1.read();
 
         if (_u2len == 0) {
             if (b == UART2_START) _u2buf[_u2len++] = b;
@@ -151,13 +151,13 @@ static void uart2_poll() {
 // Expected payload: {"state":"ON","brightness":200}
 static void uart2_send_command(uint8_t spot_id, uint8_t command, uint8_t brightness) {
     uint8_t frame[6] = {UART2_START, UART2_CMD, spot_id, brightness, command, UART2_END};
-    Serial2.write(frame, sizeof(frame));
+    Serial1.write(frame, sizeof(frame));
     Serial.printf("[MQTT→UART2] spot=%d cmd=0x%02X bri=%d\n", spot_id, command, brightness);
 }
 
 static void uart2_send_version(uint8_t target_version) {
     uint8_t frame[4] = {UART2_START, UART2_VERSION, target_version, UART2_END};
-    Serial2.write(frame, sizeof(frame));
+    Serial1.write(frame, sizeof(frame));
     Serial.printf("[UART2] VERSION frame sent → master (target=%d)\n", target_version);
 }
 
@@ -255,7 +255,7 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial2.begin(115200, SERIAL_8N1, PIN_UART2_RX, PIN_UART2_TX);
+    Serial1.begin(115200, SERIAL_8N1, PIN_UART1_RX, PIN_UART1_TX);
     delay(200);
 
     Serial.println("[BOOT] WiFi Bridge starting...");
