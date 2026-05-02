@@ -673,6 +673,7 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_max_tx_power(52);  // 13 dBm — same as spots; reduces heat on C3 SuperMini
     Serial.printf("[BOOT] Master — MAC: %s  CH: %d\n",
                   WiFi.macAddress().c_str(), WiFi.channel());
 
@@ -767,7 +768,10 @@ void loop() {
     // 4. Poll UART2 for incoming frames from WiFi ESP32-B
     uart2_poll();
 
-    // 5. Accumulate serial input, process on newline
+    // 5. Yield to idle task — allows light-sleep between events, reduces heat
+    delay(1);
+
+    // 6. Accumulate serial input, process on newline
     while (Serial.available()) {
         char c = (char)Serial.read();
         if (c == '\n' || c == '\r') {
