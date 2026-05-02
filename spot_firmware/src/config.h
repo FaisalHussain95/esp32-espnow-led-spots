@@ -7,9 +7,6 @@
 // Use provisioning_get_spot_id() at runtime — do not use CONFIG_SPOT_ID directly.
 extern uint8_t SPOT_ID;
 
-// Master MAC — the spot sends status/hello to this address.
-static const uint8_t MASTER_MAC[6] = {0x10, 0x00, 0x3B, 0xB8, 0x52, 0x7C};
-
 // ─── GPIO Pin Assignments ─────────────────────────────────────────────────────
 // ESP32 WROVER (prototype)
 // #define PIN_PWM_OUT     18   // LEDC output → PT4115 DIM pin
@@ -65,7 +62,7 @@ static const uint8_t MASTER_MAC[6] = {0x10, 0x00, 0x3B, 0xB8, 0x52, 0x7C};
 #define ESPNOW_CHANNEL  11   // WiFi channel for all ESP-NOW traffic (1, 6, or 11)
 
 // ─── Firmware Version & OTA ───────────────────────────────────────────────────
-#define FW_VERSION  29
+#define FW_VERSION  30
 #define OTA_MAX_ATTEMPTS  5
 #define OTA_RETRY_DELAY_MS  10000
 #define OTA_BASE_URL \

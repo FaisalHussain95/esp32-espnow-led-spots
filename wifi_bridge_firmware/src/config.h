@@ -20,10 +20,10 @@
 // Discovery: homeassistant/light/led_spot_<id>/config
 #define MQTT_TOPIC_PREFIX  "homeassistant/led_spots"
 #define MQTT_CLIENT_ID     "led-spots-bridge"
-#define NUM_SPOTS          10
+#define NUM_SPOTS          13
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  28
+#define FW_VERSION  30
 
 // ─── UART2 frame bytes (must match master_firmware) ───────────────────────────
 #define UART2_START    0xAA

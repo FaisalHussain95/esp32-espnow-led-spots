@@ -84,14 +84,19 @@ void provisioning_init() {
     prefs.end();
 
     // ── Master MAC ────────────────────────────────────────────────────────────
-    // Always write the hardcoded MASTER_MAC from config.h to NVS so the next
-    // firmware can read it from NVS and drop the hardcoded value entirely.
+    // Read from NVS — written by v29 firmware. Halt if missing (spot was never
+    // provisioned with a master MAC).
     prefs.begin("espnow", false);
-    memcpy(_master_mac, MASTER_MAC, 6);
-    prefs.putBytes("master_mac", _master_mac, 6);
-    Serial.printf("[PROV] Master MAC written to NVS: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  _master_mac[0], _master_mac[1], _master_mac[2],
-                  _master_mac[3], _master_mac[4], _master_mac[5]);
+    size_t mac_len = prefs.getBytesLength("master_mac");
+    if (mac_len == 6) {
+        prefs.getBytes("master_mac", _master_mac, 6);
+        Serial.printf("[PROV] Master MAC loaded from NVS: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      _master_mac[0], _master_mac[1], _master_mac[2],
+                      _master_mac[3], _master_mac[4], _master_mac[5]);
+    } else {
+        Serial.println("[PROV] ERROR: master_mac not in NVS — flash v29 first to provision it.");
+        while (true) delay(1000);
+    }
     prefs.end();
 }
 

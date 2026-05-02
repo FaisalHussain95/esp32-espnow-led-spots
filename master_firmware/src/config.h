@@ -18,7 +18,7 @@ static const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define ESPNOW_CHANNEL  11   // WiFi channel for all ESP-NOW traffic (1, 6, or 11)
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  29   // Master firmware version (for reference)
+#define FW_VERSION  30   // Master firmware version (for reference)
 
 // ─── Optional OLED display ────────────────────────────────────────────────────
 // Set to 0 to disable the SSD1306 screen (reduces heat, frees I2C pins).

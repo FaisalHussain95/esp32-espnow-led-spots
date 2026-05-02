@@ -142,8 +142,10 @@ void espnow_init() {
                   FW_VERSION, SPOT_ID, hello_err);
 
     // Register master peer with encryption for all subsequent packets
+    uint8_t master_mac[6];
+    provisioning_get_master_mac(master_mac);
     esp_now_peer_info_t peer = {};
-    memcpy(peer.peer_addr, MASTER_MAC, 6);
+    memcpy(peer.peer_addr, master_mac, 6);
     peer.channel = 0;
     peer.encrypt = true;
     memcpy(peer.lmk, pmk, 16);
@@ -170,7 +172,9 @@ void sendStatus(uint8_t brightness, float temperature,
     pkt.status.thermal_state = thermal_state;
     pkt.status.is_on         = is_on;
 
-    esp_err_t err = esp_now_send(MASTER_MAC, (uint8_t *)&pkt, sizeof(pkt));
+    uint8_t master_mac[6];
+    provisioning_get_master_mac(master_mac);
+    esp_err_t err = esp_now_send(master_mac, (uint8_t *)&pkt, sizeof(pkt));
     if (err != ESP_OK) {
         Serial.printf("[ESPNOW] sendStatus err=0x%x\n", err);
     }
