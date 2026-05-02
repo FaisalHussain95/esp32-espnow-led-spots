@@ -19,3 +19,7 @@ uint8_t provisioning_get_spot_id();
 // Returns false and prints an error if pmk_hex is invalid — NVS is not touched.
 // Call ESP.restart() after a successful write to apply the new values.
 bool provisioning_write(uint8_t spot_id, const char *ssid, const char *password, const char *pmk_hex);
+
+// Returns the master MAC loaded from NVS into the provided 6-byte buffer.
+// Must be called after provisioning_init().
+void provisioning_get_master_mac(uint8_t mac_out[6]);

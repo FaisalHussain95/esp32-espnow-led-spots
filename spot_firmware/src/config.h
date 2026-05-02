@@ -65,7 +65,7 @@ static const uint8_t MASTER_MAC[6] = {0x10, 0x00, 0x3B, 0xB8, 0x52, 0x7C};
 #define ESPNOW_CHANNEL  11   // WiFi channel for all ESP-NOW traffic (1, 6, or 11)
 
 // ─── Firmware Version & OTA ───────────────────────────────────────────────────
-#define FW_VERSION  28
+#define FW_VERSION  29
 #define OTA_MAX_ATTEMPTS  5
 #define OTA_RETRY_DELAY_MS  10000
 #define OTA_BASE_URL \

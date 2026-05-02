@@ -1,9 +1,11 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "provisioning.h"
+#include "config.h"
 
-static uint8_t _pmk[16]   = {};
-static uint8_t _spot_id   = 0;
+static uint8_t _pmk[16]        = {};
+static uint8_t _spot_id        = 0;
+static uint8_t _master_mac[6]  = {};
 
 // Convert 32-char lowercase hex string to 16-byte array.
 static bool hex_to_bytes(const char *hex, uint8_t *out, size_t out_len) {
@@ -80,6 +82,17 @@ void provisioning_init() {
         Serial.println("[PROV] WiFi credentials loaded from NVS.");
     }
     prefs.end();
+
+    // ── Master MAC ────────────────────────────────────────────────────────────
+    // Always write the hardcoded MASTER_MAC from config.h to NVS so the next
+    // firmware can read it from NVS and drop the hardcoded value entirely.
+    prefs.begin("espnow", false);
+    memcpy(_master_mac, MASTER_MAC, 6);
+    prefs.putBytes("master_mac", _master_mac, 6);
+    Serial.printf("[PROV] Master MAC written to NVS: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  _master_mac[0], _master_mac[1], _master_mac[2],
+                  _master_mac[3], _master_mac[4], _master_mac[5]);
+    prefs.end();
 }
 
 void provisioning_get_pmk(uint8_t pmk_out[16]) {
@@ -88,6 +101,10 @@ void provisioning_get_pmk(uint8_t pmk_out[16]) {
 
 uint8_t provisioning_get_spot_id() {
     return _spot_id;
+}
+
+void provisioning_get_master_mac(uint8_t mac_out[6]) {
+    memcpy(mac_out, _master_mac, 6);
 }
 
 bool provisioning_write(uint8_t spot_id, const char *ssid, const char *password, const char *pmk_hex) {
