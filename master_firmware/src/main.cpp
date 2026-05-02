@@ -4,9 +4,11 @@
 #include <esp_wifi.h>
 #include <Preferences.h>
 #include <HTTPUpdate.h>
+#if ENABLE_OLED
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#endif
 #include "config.h"
 
 // ─── PMK (loaded from NVS on boot) ────────────────────────────────────────────
@@ -15,6 +17,7 @@ static uint8_t _pmk[16] = {};
 // Required slave firmware version — always matches compiled FW_VERSION
 static const uint8_t _required_fw_version = FW_VERSION;
 
+#if ENABLE_OLED
 // ─── OLED ─────────────────────────────────────────────────────────────────────
 // ESP32-C3 SuperMini: SSD1306 128×32, I2C on SDA=GPIO1, SCL=GPIO0, no RST pin
 #define OLED_WIDTH   128
@@ -24,6 +27,7 @@ static const uint8_t _required_fw_version = FW_VERSION;
 #define OLED_SCL       0
 
 static Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
+#endif
 
 // ─── Receive buffer (ISR → loop bridge) ───────────────────────────────────────
 static volatile bool    _status_available   = false;
@@ -33,6 +37,7 @@ static esp_now_status_t  _status_buffer;
 
 // Runtime MAC table: index 0 = spot 0x01, populated on HELLO
 static uint8_t g_spot_macs[NUM_SPOTS][6];
+static uint8_t g_spot_fw[NUM_SPOTS];  // fw_version per spot, from HELLO
 
 typedef struct {
     uint8_t mac[6];
@@ -59,7 +64,9 @@ static esp_now_status_t g_spot_state[NUM_SPOTS] = {};
 static void addPeer(const uint8_t *mac);
 static void sendCommand(uint8_t spot_id, uint8_t command, uint8_t brightness, uint16_t param = 0);
 static void uart2_send_handshake(uint8_t spot_id, uint8_t fw_version);
+#if ENABLE_OLED
 static void updateOLED();
+#endif
 
 // ─── ESP-NOW callbacks ────────────────────────────────────────────────────────
 static void onDataReceive(const uint8_t *mac, const uint8_t *data, int len) {
@@ -272,9 +279,10 @@ static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spo
         Serial.printf("[HELLO] New peer registered: %s\n", mac_str);
     }
 
-    // Store spot_id → MAC mapping in RAM
+    // Store spot_id → MAC + fw_version mapping in RAM
     if (spot_id >= 0x01 && spot_id <= NUM_SPOTS) {
         memcpy(g_spot_macs[spot_id - 1], mac, 6);
+        g_spot_fw[spot_id - 1]            = spot_fw_version;
         g_spot_state[spot_id - 1].spot_id = spot_id;
     }
 
@@ -293,15 +301,18 @@ static void handleHello(const uint8_t *mac, uint8_t spot_fw_version, uint8_t spo
     uart2_send_handshake(spot_id, spot_fw_version);
 
     // Refresh OLED immediately so newly discovered spots appear
+#if ENABLE_OLED
     updateOLED();
+#endif
 }
 
+#if ENABLE_OLED
 // ─── OLED display ─────────────────────────────────────────────────────────────
 // Shows the last received status for each known spot, 1 row per spot.
 // Layout (128×32, 8px rows):
-//   Row 0: "MASTER  LED SPOTS"
+//   Row 0: "MASTER v29  LED SPOTS"
 //   Row 1: separator line
-//   Row 2..3: "S1 ON  255 24.3C!"  (up to 2 spots)
+//   Row 2..3: "S1 ON 255 24.3C v28"  (up to 2 spots)
 
 static void updateOLED() {
     oled.clearDisplay();
@@ -310,7 +321,9 @@ static void updateOLED() {
 
     // Header
     oled.setCursor(0, 0);
-    oled.print("MASTER  LED SPOTS");
+    char hdr[22];
+    snprintf(hdr, sizeof(hdr), "MASTER v%-3d LED SPOTS", FW_VERSION);
+    oled.print(hdr);
     oled.drawLine(0, 9, OLED_WIDTH - 1, 9, SSD1306_WHITE);
 
     // One row per spot that has reported in (max 2 rows on 128×32)
@@ -327,13 +340,15 @@ static void updateOLED() {
             (s.thermal_state == THERMAL_CRITICAL) ? "!" :
             (s.thermal_state == THERMAL_THROTTLE) ? "~" : " ";
 
+        // "S1 ON 255 24.3C v29"  (21 chars max at size=1, 6px/char = 21 cols)
         char buf[24];
-        snprintf(buf, sizeof(buf), "S%d %s %3d %5.1fC%s",
+        snprintf(buf, sizeof(buf), "S%d %s%3d%5.1fC%sv%d",
                  s.spot_id,
                  s.is_on ? "ON " : "OFF",
                  s.brightness,
                  s.temperature,
-                 state_icon);
+                 state_icon,
+                 g_spot_fw[i]);
         oled.print(buf);
         row++;
     }
@@ -345,6 +360,7 @@ static void updateOLED() {
 
     oled.display();
 }
+#endif
 
 // ─── OTA (self-update from GitHub releases) ───────────────────────────────────
 // URL: https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>/master_ttgo_v<N>.bin
@@ -637,6 +653,7 @@ void setup() {
     Serial1.begin(115200, SERIAL_8N1, PIN_UART1_RX, PIN_UART1_TX);
     delay(200);
 
+#if ENABLE_OLED
     Wire.begin(OLED_SDA, OLED_SCL);
     if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
         Serial.println("[WARN] SSD1306 not found — continuing without OLED");
@@ -648,6 +665,7 @@ void setup() {
         oled.print("Booting...");
         oled.display();
     }
+#endif
 
     // Load PMK from NVS (write from Kconfig on first boot)
     provisioning_init();
@@ -678,8 +696,11 @@ void setup() {
 
     memset(g_spot_state, 0, sizeof(g_spot_state));
     memset(g_spot_macs,  0, sizeof(g_spot_macs));
+    memset(g_spot_fw,    0, sizeof(g_spot_fw));
 
+#if ENABLE_OLED
     updateOLED();
+#endif
     sendWhois();
     Serial.println("[BOOT] Ready.  Type 'help' for commands.");
 }
@@ -731,7 +752,9 @@ void loop() {
                       s.brightness, s.temperature, state_str);
 
         uart2_send_status(s);
+#if ENABLE_OLED
         updateOLED();
+#endif
     }
 
     // 3. Log OTA failure notifications from spots
