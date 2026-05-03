@@ -23,7 +23,7 @@
 #define NUM_SPOTS          13
 
 // ─── Firmware Version ─────────────────────────────────────────────────────────
-#define FW_VERSION  30
+#define FW_VERSION  31
 
 // ─── UART2 frame bytes (must match master_firmware) ───────────────────────────
 #define UART2_START    0xAA
