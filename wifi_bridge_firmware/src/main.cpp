@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
+#include <esp_wifi.h>
 #include "config.h"
 
 // ─── MQTT + WiFi clients ──────────────────────────────────────────────────────
@@ -15,6 +16,8 @@ static uint8_t _u2len = 0;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 static void wifi_connect() {
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_max_tx_power(52);  // 13 dBm — reduces heat on C3 SuperMini
     Serial.printf("[WIFI] Connecting to %s", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     while (WiFi.status() != WL_CONNECTED) {
@@ -65,14 +68,36 @@ static void mqtt_publish_discovery(uint8_t spot_id) {
     mqtt.publish(config_topic, payload, true);  // retained
 }
 
+static void mqtt_publish_discovery_all() {
+    char payload[512];
+    snprintf(payload, sizeof(payload),
+        "{"
+        "\"name\":\"LED Spots (All)\","
+        "\"unique_id\":\"led_spot_all\","
+        "\"schema\":\"json\","
+        "\"state_topic\":\"%s/all/state\","
+        "\"command_topic\":\"%s/all/set\","
+        "\"brightness\":true,"
+        "\"brightness_scale\":255,"
+        "\"device\":{"
+            "\"identifiers\":[\"led_spots\"],"
+            "\"name\":\"DIY LED Spots\","
+            "\"model\":\"ESP32-C3 + PT4115\","
+            "\"manufacturer\":\"DIY\""
+        "}"
+        "}",
+        MQTT_TOPIC_PREFIX, MQTT_TOPIC_PREFIX);
+
+    mqtt.publish("homeassistant/light/led_spot_all/config", payload, true);
+}
+
 static void mqtt_subscribe_all() {
     char topic[64];
     for (int i = 1; i <= NUM_SPOTS; i++) {
         snprintf(topic, sizeof(topic), "%s/%d/set", MQTT_TOPIC_PREFIX, i);
         mqtt.subscribe(topic);
     }
-    // OTA trigger topic: homeassistant/led_spots/ota/set
-    //   payload: {"version":2}
+    mqtt.subscribe(MQTT_TOPIC_PREFIX "/all/set");
     mqtt.subscribe(MQTT_TOPIC_PREFIX "/ota/set");
 }
 
@@ -86,10 +111,9 @@ static void mqtt_connect() {
         if (ok) {
             Serial.println(" connected.");
             mqtt_subscribe_all();
-            // Publish HA discovery for all spots
-            for (int i = 1; i <= NUM_SPOTS; i++) {
+            for (int i = 1; i <= NUM_SPOTS; i++)
                 mqtt_publish_discovery(i);
-            }
+            mqtt_publish_discovery_all();
         } else {
             Serial.printf(" failed (rc=%d), retrying in 5s\n", mqtt.state());
             delay(5000);
@@ -217,46 +241,44 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
         return;
     }
 
-    // Spot command topic: homeassistant/led_spots/<id>/set
-    char topic_copy[64];
-    strncpy(topic_copy, topic, sizeof(topic_copy) - 1);
-    topic_copy[sizeof(topic_copy) - 1] = '\0';
+    // Spot command topic: homeassistant/led_spots/<id>/set  or  .../all/set
+    bool is_all = (strstr(topic, "/all/set") != nullptr);
+    uint8_t spot_id = 0xFF;
 
-    // Find spot ID — second-to-last segment (before "/set")
-    char *seg = strtok(topic_copy, "/");
-    int spot_id = 0;
-    char *prev = nullptr;
-    while (seg) {
-        prev = seg;
-        seg = strtok(nullptr, "/");
+    if (!is_all) {
+        char topic_copy[64];
+        strncpy(topic_copy, topic, sizeof(topic_copy) - 1);
+        topic_copy[sizeof(topic_copy) - 1] = '\0';
+        char *seg = strtok(topic_copy, "/");
+        char *prev = nullptr;
+        while (seg) { prev = seg; seg = strtok(nullptr, "/"); }
+        int id = prev ? atoi(prev) : 0;
+        if (id < 1 || id > NUM_SPOTS) return;
+        spot_id = (uint8_t)id;
     }
-    if (prev) spot_id = atoi(prev);
-    if (spot_id < 1 || spot_id > NUM_SPOTS) return;
 
-    // Parse {"state":"ON"/"OFF","brightness":0-255}
-    bool turn_on  = (strstr(msg, "\"ON\"")  != nullptr);
-    bool turn_off = (strstr(msg, "\"OFF\"") != nullptr);
+    // Parse JSON: {"state":"ON","brightness":200}
+    bool turn_on  = strstr(msg, "\"ON\"")  != nullptr;
+    bool turn_off = strstr(msg, "\"OFF\"") != nullptr;
 
     uint8_t brightness = 255;
     char *bri_ptr = strstr(msg, "\"brightness\":");
-    if (bri_ptr) {
-        brightness = (uint8_t)atoi(bri_ptr + 13);
-    }
+    if (bri_ptr) brightness = (uint8_t)atoi(bri_ptr + 13);
 
     if (turn_off) {
-        uart2_send_command((uint8_t)spot_id, CMD_TURN_OFF, 0);
+        uart2_send_command(spot_id, CMD_TURN_OFF, 0);
     } else if (turn_on) {
-        uart2_send_command((uint8_t)spot_id, CMD_TURN_ON, brightness);
+        uart2_send_command(spot_id, CMD_TURN_ON, brightness);
     } else if (bri_ptr) {
-        uart2_send_command((uint8_t)spot_id, CMD_SET_BRIGHTNESS, brightness);
+        uart2_send_command(spot_id, CMD_SET_BRIGHTNESS, brightness);
     }
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial1.begin(115200, SERIAL_8N1, PIN_UART1_RX, PIN_UART1_TX);
     delay(200);
+    Serial1.begin(115200, SERIAL_8N1, PIN_UART1_RX, PIN_UART1_TX);
 
     Serial.println("[BOOT] WiFi Bridge starting...");
 

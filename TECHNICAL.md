@@ -14,15 +14,16 @@ Home Assistant
      │ MQTT (WiFi)
      │
 ┌────┴──────────────┐
-│  WiFi Bridge      │  Generic ESP32 dev board
-│  (ESP32-B)        │  WiFi + MQTT ↔ UART2 bridge
+│  WiFi Bridge      │  ESP32-C3 SuperMini
+│                   │  WiFi + MQTT ↔ UART bridge
 └────────┬──────────┘
-         │ UART2 binary frames (115200 baud)
-         │ TX=17 → RX=35 (TTGO)
-         │ RX=16 ← TX=13 (TTGO)
+         │ UART1 binary frames (115200 baud)
+         │ GPIO6(TX) → GPIO7(RX) (Master)
+         │ GPIO7(RX) ← GPIO6(TX) (Master)
 ┌────────┴──────────┐
-│  Master Node      │  TTGO LoRa32 V1.x
-│  (ESP32-A / TTGO) │  ESP-NOW only + SSD1306 OLED
+│  Master Node      │  ESP32-C3 SuperMini
+│                   │  ESP-NOW only
+│                   │  Optional: 0.91" SSD1306 128×32 OLED (SDA=GPIO1, SCL=GPIO0)
 └────────┬──────────┘
          │ ESP-NOW (PMK encrypted, 2.4GHz)
          │
@@ -33,8 +34,8 @@ Home Assistant
  SuperMini SuperMini SuperMini
 ```
 
-The master (TTGO) runs ESP-NOW only — no WiFi.
-The WiFi bridge handles MQTT/HA and translates commands to/from UART2 binary frames.
+The master (ESP32-C3 SuperMini) runs ESP-NOW only — no WiFi.
+The WiFi bridge handles MQTT/HA and translates commands to/from UART binary frames.
 This separation avoids ESP-NOW peer drops caused by WiFi channel switching.
 
 ---
@@ -53,20 +54,20 @@ spot_firmware/          — One binary per spot (ESP32-C3 SuperMini)
     ├── provisioning.h/.cpp   # PMK + WiFi creds from build_flags → NVS (first boot only)
     └── ota.h/.cpp            # HTTP OTA update from GitHub release URL (5 retries)
 
-master_firmware/        — One binary for the master node (TTGO LoRa32)
+master_firmware/        — One binary for the master node (ESP32-C3 SuperMini)
 ├── platformio.ini
 └── src/
-    ├── main.cpp              # ESP-NOW master, OLED display, serial CLI, UART2 bridge
-    └── config.h              # Spot MAC table, packet structs, UART2 pin defines
+    ├── main.cpp              # ESP-NOW master, OLED display, serial CLI, UART bridge
+    └── config.h              # Spot MAC table, packet structs, UART pin defines
 
-wifi_bridge_firmware/   — One binary for the WiFi bridge (generic ESP32)
+wifi_bridge_firmware/   — One binary for the WiFi bridge (ESP32-C3 SuperMini)
 ├── platformio.ini
 └── src/
-    ├── main.cpp              # WiFi + MQTT ↔ UART2 bridge, HA MQTT Discovery
-    └── config.h              # UART2 pins, MQTT topic prefix, frame constants
+    ├── main.cpp              # WiFi + MQTT ↔ UART bridge, HA MQTT Discovery
+    └── config.h              # UART pins, MQTT topic prefix, frame constants
 ```
 
-**Porting a spot to a new unit:** only change `SPOT_ID` (0x01–0x0A) and `MASTER_MAC[]` in `spot_firmware/src/config.h`.
+**Porting a spot to a new unit:** only change `SPOT_ID` (0x01–0x0A) in `spot_firmware/src/config.h`. The master MAC is read from NVS via `provisioning_get_master_mac()` — it is no longer hardcoded.
 
 ---
 
@@ -129,12 +130,20 @@ GND
 
 ### GPIO Pin Mapping
 
-#### ESP32-C3 SuperMini (final)
+#### ESP32-C3 SuperMini (spot node — final)
 | Function | GPIO | Notes |
 |---|---|---|
 | PWM → PT4115 DIM | GPIO10 | LEDC 10kHz 8-bit, no ADC, no strapping conflict |
 | NTC ADC | GPIO3 | ADC1_CH3 — safe with ESP-NOW active (ADC1 only) |
 | Status LED | GPIO8 | Onboard blue LED, **active LOW** |
+
+#### Master / Bridge (ESP32-C3 SuperMini)
+| Function | GPIO | Notes |
+|---|---|---|
+| UART1 TX (to bridge/master) | GPIO6 | Cross-connected TX→RX |
+| UART1 RX (from bridge/master) | GPIO7 | Cross-connected RX←TX |
+| OLED SDA (master only, optional) | GPIO1 | I2C, 0.91" SSD1306 128×32 |
+| OLED SCL (master only, optional) | GPIO0 | I2C |
 
 #### ESP32 WROVER (prototype only)
 | Function | GPIO | Notes |
@@ -268,28 +277,28 @@ https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>
 
 ### Triggering OTA
 
-**Via serial (master TTGO):**
+**Via serial (Master):**
 ```
-version 2
+version 30
 ```
 
 **Via MQTT (Home Assistant):**
 ```
 Topic:   homeassistant/led_spots/ota/set
-Payload: {"version":2}
+Payload: {"version":30}
 ```
 
 ---
 
-## UART2 Bridge
+## UART Bridge
 
-Binary frame protocol between TTGO master (ESP32-A) and WiFi bridge (ESP32-B).
+Binary frame protocol between master (ESP32-C3 SuperMini) and WiFi bridge (ESP32-C3 SuperMini).
 
 ### Pin connections
-| TTGO Master (ESP32-A) | WiFi Bridge (ESP32-B) |
+| Master C3 | Bridge C3 |
 |---|---|
-| GPIO13 TX | GPIO16 RX |
-| GPIO35 RX | GPIO17 TX |
+| GPIO6 TX | GPIO7 RX |
+| GPIO7 RX | GPIO6 TX |
 | GND | GND |
 
 ### Frame format (115200 baud, 8N1)
@@ -323,7 +332,7 @@ The WiFi bridge publishes MQTT Discovery payloads on connect — spots appear au
 
 ## Master Serial CLI
 
-Connect to TTGO on 115200 baud:
+Connect to Master (ESP32-C3 SuperMini) on 115200 baud:
 
 ```
 on    <spot|all> [bri]        Turn on (brightness 0–255, default 255)
@@ -339,7 +348,7 @@ Examples:
 ```
 on all         → turn on all spots at full brightness
 dim 3 128      → set spot 3 to ~50% brightness
-version 2      → push OTA firmware v2 to all spots
+version 30     → push OTA firmware v30 to all spots
 ```
 
 ---
@@ -417,9 +426,9 @@ On reboot the spot loads credentials from NVS and the build_flags values are ign
 Pushing a git tag builds all three firmware targets and creates a GitHub release with `.bin` files attached.
 
 ```bash
-git tag v2
-git push origin v2
-# Builds: slave_c3_supermini_v2.bin  master_ttgo_v2.bin  wifi_bridge_v2.bin
+git tag v30
+git push origin v30
+# Builds: slave_c3_supermini_v30.bin  master_c3_supermini_v30.bin  wifi_bridge_v30.bin
 # Creates GitHub release with all three files
 ```
 
@@ -488,6 +497,7 @@ kicad/diy_led_spot/
 | Firmware | Namespace | Key | Type | Content |
 |---|---|---|---|---|
 | Spot | `espnow` | `pmk` | bytes (16) | Shared PMK |
+| Spot | `espnow` | `master_mac` | bytes (6) | Master ESP-NOW MAC (written by v29, read from v30+) |
 | Spot | `wifi` | `ssid` | string | WiFi SSID (OTA only) |
 | Spot | `wifi` | `password` | string | WiFi password (OTA only) |
 | Master | `espnow` | `pmk` | bytes (16) | Shared PMK |
@@ -506,9 +516,9 @@ kicad/diy_led_spot/
 ## Next Steps
 
 - [x] Write spot node firmware (dimming, thermal protection, ESP-NOW)
-- [x] Write master controller firmware (TTGO LoRa32 + OLED + serial CLI)
+- [x] Write master controller firmware (ESP32-C3 SuperMini + optional OLED + serial CLI)
 - [x] Port spot firmware to ESP32-C3 SuperMini
-- [x] Add WiFi bridge (UART2 ↔ MQTT) for Home Assistant integration
+- [x] Add WiFi bridge (UART ↔ MQTT) for Home Assistant integration
 - [x] ESP-NOW PMK encryption + boot handshake protocol
 - [x] OTA update system (HTTP from GitHub releases, 5-retry)
 - [x] GitHub Actions CI (auto-build + release on git tag push)
@@ -520,3 +530,6 @@ kicad/diy_led_spot/
 - [ ] Validate thermal performance on first assembled unit
 - [x] Active cooling: 5V 25mm fan via MT3608 boost converter (GPIO5 EN) + AO3400 MOSFET (GPIO4) — fan ON above 45°C, OFF below 40°C (hysteresis), forced ON on NTC fault. PCB rev includes MT3608 + MOSFET footprint.
 - [x] Default boot state: ON — spot lights up immediately when mains power is applied; mains switch acts as physical on/off control without requiring master commands.
+- [x] Migrate master and WiFi bridge from TTGO LoRa32 / generic ESP32 to ESP32-C3 SuperMini
+- [x] Master MAC provisioning via NVS (no more hardcoded MASTER_MAC in spot firmware)
+- [x] TX power cap at 13 dBm + FreeRTOS yield in master loop (heat reduction)

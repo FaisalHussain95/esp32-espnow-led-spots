@@ -17,10 +17,10 @@ jobs:
           - env: esp32c3supermini
             dir: spot_firmware
             artifact: slave_c3_supermini
-          - env: ttgo-lora32
+          - env: master-c3
             dir: master_firmware
-            artifact: master_ttgo
-          - env: wifi-bridge
+            artifact: master_c3
+          - env: wifi-bridge-c3
             dir: wifi_bridge_firmware
             artifact: wifi_bridge
 
@@ -98,7 +98,7 @@ jobs:
             | File | Description |
             |---|---|
             | `slave_c3_supermini_v${{ steps.version.outputs.version }}.bin` | Spot node (ESP32-C3 SuperMini) |
-            | `master_ttgo_v${{ steps.version.outputs.version }}.bin` | Master node (TTGO LoRa32) |
+            | `master_c3_v${{ steps.version.outputs.version }}.bin` | Master node (ESP32-C3 SuperMini) |
             | `wifi_bridge_v${{ steps.version.outputs.version }}.bin` | WiFi bridge (generic ESP32) |
 
             ### OTA Update

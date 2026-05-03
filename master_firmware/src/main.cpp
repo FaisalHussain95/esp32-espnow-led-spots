@@ -363,9 +363,9 @@ static void updateOLED() {
 #endif
 
 // ─── OTA (self-update from GitHub releases) ───────────────────────────────────
-// URL: https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>/master_ttgo_v<N>.bin
+// URL: https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v<N>/master_c3_v<N>.bin
 #define MASTER_OTA_URL_FMT \
-    "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/master_ttgo_v%d.bin"
+    "https://github.com/FaisalHussain95/esp32-espnow-led-spots/releases/download/v%d/master_c3_v%d.bin"
 
 static void espnow_reinit() {
     WiFi.disconnect(true);

@@ -12,7 +12,7 @@ DIY replacement of 10x 220VAC LED spots with custom COB LED + ESP32-C3 controlle
 # Spot node (ESP32-C3 SuperMini, COM10)
 cd spot_firmware && pio run --target upload
 
-# Master (TTGO LoRa32, COM7)
+# Master (ESP32-C3 SuperMini, COM8)
 cd master_firmware && pio run --target upload
 
 # WiFi bridge (generic ESP32 — set upload_port in platformio.ini first)
@@ -42,9 +42,9 @@ NVS namespaces: `espnow` (PMK), `spot` (spot_id), `wifi` (ssid/password).
 ```
 Home Assistant (MQTT)
         ↕ WiFi
-[wifi_bridge_firmware] (generic ESP32, GPIO17 TX / GPIO16 RX)
+[wifi_bridge_firmware] (ESP32-C3 SuperMini, GPIO6 TX / GPIO7 RX)
         ↕ UART2 binary frames (115200 baud)
-[master_firmware] (TTGO LoRa32, GPIO13 TX / GPIO35 RX)
+[master_firmware] (ESP32-C3 SuperMini, GPIO6 TX / GPIO7 RX)
         ↕ ESP-NOW encrypted (PMK AES-128, WiFi ch11)
 [spot_firmware × N] (ESP32-C3 SuperMini, up to 254 spots)
 ```
@@ -105,7 +105,7 @@ typedef struct __attribute__((packed)) {
 
 ## UART2 Binary Bridge Protocol
 
-Master (TTGO GPIO13 TX / GPIO35 RX) ↔ WiFi bridge (GPIO17 TX / GPIO16 RX), 115200 baud.
+Master (ESP32-C3 SuperMini, GPIO6 TX / GPIO7 RX) ↔ WiFi bridge (ESP32-C3 SuperMini, GPIO6 TX / GPIO7 RX), 115200 baud.
 
 | Frame | Bytes | Layout |
 |---|---|---|
@@ -169,14 +169,11 @@ Status LED patterns: heartbeat (1s on / 2s off) = normal; solid = throttling; ra
 ### Key Platform Quirks
 
 - **LEDC API (Arduino-ESP32 v3.x):** `ledcAttach(pin, freq, bits)` + `ledcWrite(pin, val)` — no channel args
-- **TTGO LoRa32 V1 OLED:** SDA=4, SCL=15, RST=16. Let Adafruit lib handle RST via constructor — do not toggle manually
-- **TTGO brownout:** Disable with `WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0)` — USB power sags on ESP-NOW TX
-- **WROVER GPIO16:** Tied to PSRAM CS — never drive LOW. Use `-DBOARD_HAS_PSRAM=0` on master to suppress init errors
 - **ESP32-C3 USB:** Native USB-Serial-JTAG — no CH340/CP2102; `-DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1` required
 
 ## Serial CLIs
 
-### Master CLI (via monitor on COM7)
+### Master CLI (via monitor on COM8)
 ```
 on  <spot|all> [bri]        — turn on (default bri=255)
 off <spot|all>              — turn off

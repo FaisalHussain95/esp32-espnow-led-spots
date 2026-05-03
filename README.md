@@ -7,11 +7,11 @@ graph LR
     HA[🏠 Home Assistant]
 
     subgraph wifi_net[IoT WiFi network]
-        BR[WiFi Bridge\nESP32\nWiFi mode]
+        BR[WiFi Bridge\nESP32-C3 SuperMini\nWiFi mode]
     end
 
     subgraph espnow_net[ESP-NOW ch11 — AES-128 — no WiFi]
-        MA[Master\nTTGO LoRa32]
+        MA[Master\nESP32-C3 SuperMini]
         S1[Spot 1\nESP32-C3]
         S2[Spot 2\nESP32-C3]
         SN[Spot 3…13\nESP32-C3]
@@ -120,13 +120,13 @@ The driver electronics sit on a custom KiCad board that fits inside the spot she
 
 ## How it works
 
-Each spot is an ESP32-C3 node. A TTGO LoRa32 acts as master. A third ESP32 bridges MQTT to the master over UART. The spots never touch WiFi during normal operation — everything runs over ESP-NOW on a dedicated channel.
+Each spot is an ESP32-C3 node. An ESP32-C3 SuperMini acts as master. A second ESP32-C3 SuperMini bridges MQTT to the master over UART. The spots never touch WiFi during normal operation — everything runs over ESP-NOW on a dedicated channel.
 
 ```mermaid
 sequenceDiagram
     participant HA as Home Assistant
-    participant BR as WiFi Bridge<br/>(generic ESP32)
-    participant MA as Master<br/>(TTGO LoRa32)
+    participant BR as WiFi Bridge<br/>(ESP32-C3 SuperMini)
+    participant MA as Master<br/>(ESP32-C3 SuperMini)
     participant SP as Spot × N<br/>(ESP32-C3)
     participant GH as GitHub Releases<br/>(OTA)
 
@@ -146,11 +146,11 @@ sequenceDiagram
 
     note over HA,SP: ── Normal operation ──
     HA->>BR: MQTT homeassistant/led_spots/{id}/set<br/>{"state":"ON","brightness":200}
-    BR->>MA: UART2 frame 0xAA 0x01 spot_id bri cmd 0x55
+    BR->>MA: UART frame 0xAA 0x01 spot_id bri cmd 0x55
     MA->>SP: MSG_CMD {spot_id, CMD_TURN_ON, brightness}
 
     SP-->>MA: MSG_STATUS every 10 s<br/>{spot_id, brightness, temp°C, thermal_state, is_on}
-    MA-->>BR: UART2 frame 0xAA 0x02 spot_id bri temp_hi temp_lo thermal 0x55
+    MA-->>BR: UART frame 0xAA 0x02 spot_id bri temp_hi temp_lo thermal 0x55
     BR-->>HA: MQTT homeassistant/led_spots/{id}/state<br/>{"state":"ON","brightness":200,"temperature":42.3}
 
     note over SP: ── Thermal protection (on-spot) ──
@@ -158,10 +158,10 @@ sequenceDiagram
     SP-->>MA: MSG_STATUS {thermal_state: critical}
 
     note over HA,GH: ── OTA triggered from HA ──
-    HA->>BR: MQTT homeassistant/led_spots/ota/set {"version":29}
-    BR->>MA: UART2 frame 0xAA 0x03 target_version 0x55
+    HA->>BR: MQTT homeassistant/led_spots/ota/set {"version":30}
+    BR->>MA: UART frame 0xAA 0x03 target_version 0x55
     MA->>SP: MSG_OTA_NOW {target_version} (broadcast)
-    SP->>GH: HTTP GET slave_c3_supermini_v29.bin
+    SP->>GH: HTTP GET slave_c3_supermini_v30.bin
     GH-->>SP: firmware binary → flash & reboot
 ```
 
